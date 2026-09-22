@@ -680,6 +680,38 @@ server — e.g. via a one-off `php artisan tinker --execute="..."` call using
 for `framework/sessions` and `framework/cache/data`). Config isn't cached by default, so the fix takes
 effect on the very next request with no restart required.
 
+### 3.9 Operational finding on Laravel Cloud specifically: local disk uploads (hotel logo, etc.) are not
+reliably persisted — Object Storage is required
+
+Found while diagnosing "the logo uploads successfully but shows as a broken image everywhere." Ruled out
+first: `APP_URL` was correct and `Storage::disk('public')->url(...)` generated the right absolute URL — the
+problem is the file itself isn't reliably retrievable afterward, not the URL. This project's
+`config/filesystems.php` (standard Laravel skeleton) defines the `public` disk as `driver: local`, writing
+to `storage/app/public` on whatever server instance handles the upload request. Per Laravel Cloud's own
+documentation (cloud.laravel.com/docs/resources/object-storage), persistent file storage there is provided
+by an explicitly-attached **Object Storage** bucket resource (S3-compatible, via Cloudflare R2), which
+Laravel Cloud then injects into the running app as `FILESYSTEM_DISK` plus AWS-style credential environment
+variables — a plain local-disk write on that platform is not what backs a bucket, so a file that lands on
+local disk during an upload is not guaranteed to still be there (or reachable from whichever instance
+serves the next request) afterward. This is a platform characteristic, not a bug introduced anywhere in
+this codebase — every hosting target this project was written for still works exactly as before; it's
+specific to how Laravel Cloud provisions storage.
+
+**Fix, done in two parts:**
+1. In the code: `league/flysystem-aws-s3-v3` (the package Laravel's `s3`-driver disk needs) added to
+   `composer.json`'s `require` — this repo has no `composer.lock` committed (Packagist has never been
+   reachable to generate one in the environment this correction round was built in), so Laravel Cloud's own
+   build step, which does have real Packagist access, will resolve and lock it on the next deploy with no
+   extra action needed.
+2. **On Laravel Cloud itself (dashboard action, not code)**: open the environment → **Resources → Object
+   Storage → Add bucket**, create one with **visibility: Public** (the logo needs to be viewable in a plain
+   `<img>` tag with no signed URL), and set its **disk name to exactly `public`** — matching the name this
+   codebase already uses everywhere (`Storage::disk('public')->...`, `SettingsController::uploadLogo()`,
+   the favicon partial, etc.), so it takes over that disk with **zero code changes**. Per Laravel Cloud's
+   docs, the environment must be **redeployed** after attaching the bucket for it to take effect. After
+   that, re-upload the logo once (whatever the earlier upload attempt actually wrote is on ephemeral local
+   storage and should be treated as lost, not migrated).
+
 ---
 
 ## 4. Real database concurrency testing (defects #1, #32)
