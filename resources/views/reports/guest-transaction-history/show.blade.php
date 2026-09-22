@@ -36,23 +36,43 @@
 </div>
 
 @if ($deposit_payments->isNotEmpty())
+    @php
+        $depositReceiptsTotal = $deposit_payments->where('source_module', 'reservation_deposit')->sum('amount');
+        $depositRefundsTotal = $deposit_payments->where('source_module', 'reservation_deposit_refund')->sum('amount');
+    @endphp
     <div class="mb-6 rounded-lg bg-white shadow-sm">
-        <div class="border-b p-3 text-sm font-semibold">Reservation deposits received</div>
+        <div class="border-b p-3 text-sm font-semibold">Reservation deposit activity</div>
         <table class="w-full text-sm">
             <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
-                <tr><th class="p-3">Date</th><th class="p-3">Amount</th><th class="p-3">Method</th><th class="p-3">Account</th><th class="p-3">Received by</th></tr>
+                <tr><th class="p-3">Date</th><th class="p-3">Type</th><th class="p-3">Amount</th><th class="p-3">Method</th><th class="p-3">Account</th><th class="p-3">Recorded by</th></tr>
             </thead>
             <tbody class="divide-y">
                 @foreach ($deposit_payments as $payment)
+                    @php($isRefund = $payment->source_module === 'reservation_deposit_refund')
                     <tr>
                         <td class="p-3">{{ $payment->recorded_at->format('d M Y') }}</td>
-                        <td class="p-3">{{ number_format($payment->amount, 0) }}</td>
+                        <td class="p-3">
+                            @if ($isRefund)
+                                <span class="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Refunded</span>
+                            @else
+                                <span class="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">Received</span>
+                            @endif
+                        </td>
+                        <td class="p-3 {{ $isRefund ? 'text-red-600' : '' }}">{{ $isRefund ? '-' : '' }}{{ number_format($payment->amount, 0) }}</td>
                         <td class="p-3">{{ $payment->method }}</td>
                         <td class="p-3">{{ $payment->financialAccount->name ?? '—' }}</td>
                         <td class="p-3">{{ $payment->recordedBy->name ?? '—' }}</td>
                     </tr>
                 @endforeach
             </tbody>
+            <tfoot class="border-t bg-slate-50 text-xs text-slate-600">
+                <tr>
+                    <td class="p-3" colspan="2">Net deposits held</td>
+                    <td class="p-3 font-semibold" colspan="4">{{ number_format($depositReceiptsTotal - $depositRefundsTotal, 0) }}
+                        <span class="font-normal text-slate-400">({{ number_format($depositReceiptsTotal, 0) }} received − {{ number_format($depositRefundsTotal, 0) }} refunded)</span>
+                    </td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 @endif

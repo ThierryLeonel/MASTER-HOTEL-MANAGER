@@ -68,9 +68,23 @@ class GuestTransactionHistoryService
             ->get()
             ->map(fn (Stay $stay) => $this->buildStayReport($stay));
 
+        // Correction (found live, ticket: "don't forget the inbuilt guest
+        // transaction history"): this used to query source_module
+        // 'reservation_deposit' only, so a deposit's RECEIPT always
+        // appeared here but its later refund — posted by
+        // ReservationService::disposeDeposit() as its own ledger entry,
+        // source_module 'reservation_deposit_refund', direction 'out',
+        // the exact mechanism behind the reservation show page's "Refund
+        // to guest" action on a rejected/cancelled reservation — never
+        // did. A guest (or staff reviewing this report) could see money
+        // received and have no way to see it was later paid back out.
+        // Both source_modules are now pulled together, ordered so a
+        // refund sits right after the receipt it belongs to; the view
+        // distinguishes them by sign/label rather than this needing two
+        // separate queries or a schema change.
         $depositPayments = Payment::with(['financialAccount', 'recordedBy'])
             ->where('guest_id', $guest->id)
-            ->where('source_module', 'reservation_deposit')
+            ->whereIn('source_module', ['reservation_deposit', 'reservation_deposit_refund'])
             ->orderBy('recorded_at')
             ->get();
 

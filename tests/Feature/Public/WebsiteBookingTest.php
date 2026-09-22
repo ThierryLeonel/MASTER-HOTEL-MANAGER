@@ -513,4 +513,78 @@ class WebsiteBookingTest extends TestCase
         $this->assertFalse($systemUser->is_active);
         $this->assertCount(0, $systemUser->roles);
     }
+
+    /**
+     * Reproduces a real production incident directly: on the live
+     * install, only `db:seed --class=RolesAndPermissionsSeeder` had ever
+     * been run — not the full `db:seed` — so `WebsiteBookingSeeder`
+     * (added in a later phase) never created this account, and every
+     * single website booking submission 404'd. The old code was
+     * `User::where(...)->firstOrFail()`, and Laravel's default exception
+     * handler renders a ModelNotFoundException as a bare HTTP 404 — with
+     * nothing anywhere hinting the real cause was a missing seeded row,
+     * not a missing route. ReservationService::createFromWebsite() now
+     * self-heals via firstOrCreate() instead, so this can't recur
+     * regardless of seeding history.
+     */
+    public function test_a_booking_still_succeeds_even_if_the_website_booking_system_user_was_never_seeded(): void
+    {
+        User::where('email', WebsiteBookingSeeder::EMAIL)->delete();
+        $category = RoomCategory::factory()->create(['is_active' => true]);
+
+        $response = $this->post(route('public.booking.store'), [
+            'first_name' => 'Amina',
+            'phone' => '+237699112233',
+            'room_category_id' => $category->id,
+            'check_in_date' => now()->addDay()->toDateString(),
+            'check_out_date' => now()->addDays(2)->toDateString(),
+        ]);
+
+        $reservation = Reservation::first();
+        $this->assertNotNull($reservation, 'The reservation must still be created even if the system user was missing.');
+        $response->assertRedirect(route('public.booking.success', ['ref' => $reservation->reservation_number]));
+
+        $systemUser = User::where('email', WebsiteBookingSeeder::EMAIL)->first();
+        $this->assertNotNull($systemUser, 'The system user must be self-healed, not left missing (which is what produced the live 404).');
+        $this->assertSame($systemUser->id, $reservation->requested_by);
+        $this->assertFalse($systemUser->is_active, 'A self-healed system user must match the seeder exactly: never active, never able to log in.');
+        $this->assertCount(0, $systemUser->roles);
+    }
+
+    public function test_the_self_healed_system_user_is_not_duplicated_across_concurrent_or_repeated_submissions(): void
+    {
+        User::where('email', WebsiteBookingSeeder::EMAIL)->delete();
+        $category = RoomCategory::factory()->create(['is_active' => true]);
+
+        foreach (['+237699112201', '+237699112202'] as $i => $phone) {
+            $this->post(route('public.booking.store'), [
+                'first_name' => 'Guest'.$i,
+                'phone' => $phone,
+                'room_category_id' => $category->id,
+                'check_in_date' => now()->addDay()->toDateString(),
+                'check_out_date' => now()->addDays(2)->toDateString(),
+            ]);
+        }
+
+        $this->assertSame(1, User::where('email', WebsiteBookingSeeder::EMAIL)->count());
+        $this->assertSame(2, Reservation::count());
+    }
+
+    /**
+     * Companion fix, same incident: with no custom error view in the
+     * project, a guest who hit the 404 above saw Laravel's bare default
+     * error page — which is what actually prompted the "not responsive
+     * on my phone" report (it wasn't the booking form, it was the plain
+     * page a guest landed on after the 404 fired). A branded, responsive
+     * 404 page now exists regardless of what triggers a 404 in the
+     * future.
+     */
+    public function test_a_missing_page_renders_the_branded_responsive_404_page(): void
+    {
+        $response = $this->get('/this-route-does-not-exist');
+
+        $response->assertStatus(404);
+        $response->assertSee('Page not found');
+        $response->assertSee('width=device-width', false);
+    }
 }

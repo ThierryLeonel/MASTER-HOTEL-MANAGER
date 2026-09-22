@@ -210,4 +210,111 @@ class PurchaseOrderTest extends TestCase
 
         $this->actingAs($cashier)->get(route('inventory.purchase-orders.index'))->assertForbidden();
     }
+
+    /**
+     * Direct request ("I want the accountant to be able to create
+     * purchase order"): the accountant previously held only
+     * approve-purchase-order (could approve, never raise one). Now holds
+     * manage-purchase-orders too, same as Duty Manager already does.
+     */
+    public function test_the_accountant_can_now_create_and_submit_a_purchase_order(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $supplier = Supplier::factory()->create();
+        $product = $this->product();
+
+        $store = $this->actingAs($accountant)->post(route('inventory.purchase-orders.store'), [
+            'supplier_id' => $supplier->id,
+            'product_id' => [$product->id],
+            'quantity_ordered' => [10],
+            'unit_cost' => [750],
+        ]);
+        $store->assertRedirect();
+        $po = \App\Models\PurchaseOrder::first();
+        $this->assertSame('draft', $po->status);
+
+        $this->actingAs($accountant)->post(route('inventory.purchase-orders.submit', $po))->assertRedirect();
+        $this->assertSame('submitted', $po->fresh()->status);
+    }
+
+    /**
+     * The accountant now holds both manage-purchase-orders (create) and
+     * approve-purchase-order — the same same-role combination
+     * ExpenseService::approve()'s docblock already documents this system
+     * deliberately prevents everywhere else ("every other approval pair
+     * ... purchase orders, refunds, payroll, accounting-day lock all do
+     * this already"). PurchaseOrderService::approve() now enforces it
+     * directly, per-user rather than per-role, mirroring
+     * ExpenseService/RefundService exactly.
+     */
+    public function test_an_accountant_cannot_approve_a_purchase_order_they_created_themselves(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $supplier = Supplier::factory()->create();
+        $product = $this->product();
+
+        $this->actingAs($accountant)->post(route('inventory.purchase-orders.store'), [
+            'supplier_id' => $supplier->id,
+            'product_id' => [$product->id],
+            'quantity_ordered' => [10],
+            'unit_cost' => [750],
+        ]);
+        $po = \App\Models\PurchaseOrder::first();
+        $this->actingAs($accountant)->post(route('inventory.purchase-orders.submit', $po));
+
+        $response = $this->actingAs($accountant)->post(route('inventory.purchase-orders.approve', $po));
+
+        $response->assertSessionHasErrors('error');
+        $this->assertSame('submitted', $po->fresh()->status, 'A blocked self-approval must not leave the PO half-approved.');
+    }
+
+    public function test_a_different_accountant_can_approve_a_purchase_order_created_by_the_first_one(): void
+    {
+        $requester = $this->userWithRole('accountant');
+        $approver = $this->userWithRole('accountant');
+        $supplier = Supplier::factory()->create();
+        $product = $this->product();
+
+        $this->actingAs($requester)->post(route('inventory.purchase-orders.store'), [
+            'supplier_id' => $supplier->id,
+            'product_id' => [$product->id],
+            'quantity_ordered' => [10],
+            'unit_cost' => [750],
+        ]);
+        $po = \App\Models\PurchaseOrder::first();
+        $this->actingAs($requester)->post(route('inventory.purchase-orders.submit', $po));
+
+        $this->actingAs($approver)->post(route('inventory.purchase-orders.approve', $po))->assertRedirect();
+
+        $this->assertSame('approved', $po->fresh()->status);
+    }
+
+    /**
+     * The new guard is a hard business rule, not a permission check, so
+     * it also now applies to Owner/General Manager — who hold both
+     * manage-purchase-orders and approve-purchase-order via $all and
+     * previously had no code-level guard against approving their own PO
+     * (only ever avoided in practice). This is a deliberate, documented
+     * behavior change alongside the Accountant grant, not limited to it.
+     */
+    public function test_even_an_owner_cannot_approve_a_purchase_order_they_created_themselves(): void
+    {
+        $owner = $this->userWithRole('owner');
+        $supplier = Supplier::factory()->create();
+        $product = $this->product();
+
+        $this->actingAs($owner)->post(route('inventory.purchase-orders.store'), [
+            'supplier_id' => $supplier->id,
+            'product_id' => [$product->id],
+            'quantity_ordered' => [10],
+            'unit_cost' => [750],
+        ]);
+        $po = \App\Models\PurchaseOrder::first();
+        $this->actingAs($owner)->post(route('inventory.purchase-orders.submit', $po));
+
+        $response = $this->actingAs($owner)->post(route('inventory.purchase-orders.approve', $po));
+
+        $response->assertSessionHasErrors('error');
+        $this->assertSame('submitted', $po->fresh()->status);
+    }
 }

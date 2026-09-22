@@ -578,6 +578,33 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Accountant: can now create purchase orders, suppliers, and employee records (`CORRECTION_ROUND_34_DELIVERY.md` §8.5)**
+- Direct request: "I want the accountant to be able to create purchase order, have access to employee, so as
+  to create employee and also the suppliers too." Added `manage-purchase-orders`, `manage-suppliers`, and
+  `manage-employees` to the Accountant role. Since the accountant already held `approve-purchase-order`,
+  this newly puts create-and-approve for the same purchase order in the hands of one role — the same
+  same-role combination this system already prevents for expenses/refunds, so
+  `PurchaseOrderService::approve()` gained the identical per-user self-approval guard those already use. As
+  a hard business rule rather than a permission check, this also now applies to Owner/General Manager, who
+  previously had no code-level guard against approving a PO they created themselves.
+
+**Fixed: every online booking submission 404'd — a missing seeded system user, not a routing bug — plus a
+branded 404 page and reservation-deposit refunds now showing in the guest transaction history
+(`CORRECTION_ROUND_34_DELIVERY.md` §8)**
+- Diagnosed live against the production site: `ReservationService::createFromWebsite()` attributes every
+  website-sourced reservation to a fixed, seeded "Website Booking" system account, looked up with
+  `firstOrFail()` — and on this install, only `db:seed --class=RolesAndPermissionsSeeder` had ever actually
+  been run, so that account (seeded by a later phase's `WebsiteBookingSeeder`) never existed, and
+  `ModelNotFoundException` renders as a bare 404 with no hint why. Now self-heals via `firstOrCreate()` with
+  the seeder's exact values, so this can't recur regardless of seeding history — see §8.1 for the immediate
+  one-command live fix and the full diagnosis. Also added a branded, mobile-responsive
+  `resources/views/errors/404.blade.php` (previously none existed, so any 404 fell back to Laravel's bare
+  default page — which turned out to be what actually looked "not responsive on my phone," not the booking
+  form itself, which checked out fine at a 375px viewport — see §8.2). Separately, a reservation deposit's
+  refund (already a fully-built feature, `ReservationService::disposeDeposit()`, from an earlier round's
+  defect #8 — see §8.3) was invisible in the guest transaction history report, print view, and CSV export;
+  all three now show it alongside the original deposit receipt (§8.4).
+
 **Walk-in Check-in: route a discounted rate to a named approver instead of blocking check-in (`CORRECTION_ROUND_34_DELIVERY.md` §2.9)**
 - Requested directly: "a place where the front desk or receptionist selects to identify who approved the
   discount" on the Walk-in Check-in form. Not implemented as a bare name dropdown — this codebase's

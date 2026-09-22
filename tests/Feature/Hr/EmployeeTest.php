@@ -80,6 +80,32 @@ class EmployeeTest extends TestCase
         $this->assertFalse($staff->fresh()->is_active);
     }
 
+    /**
+     * Direct request ("I want the accountant to be able to ... have
+     * access to employee, so as to create employee"): the accountant
+     * already held HR-adjacent permissions (manage-payroll, view-hr-
+     * reports) but not 'manage-employees' itself, so onboarding a new
+     * staff member was Owner/General-Manager-only until now.
+     */
+    public function test_accountant_can_now_onboard_a_staff_member(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $staff = $this->userWithRole('front_desk');
+
+        $this->actingAs($accountant)->post(route('hr.employees.store'), [
+            'user_id' => $staff->id,
+            'job_title' => 'Front Desk Agent',
+            'employment_type' => 'full_time',
+            'hire_date' => now()->subMonths(2)->toDateString(),
+            'basic_salary' => 150000,
+            'payment_method' => 'bank_transfer',
+        ])->assertRedirect();
+
+        $profile = EmployeeProfile::where('user_id', $staff->id)->first();
+        $this->assertNotNull($profile);
+        $this->assertSame('active', $profile->employment_status);
+    }
+
     public function test_duty_manager_cannot_manage_employee_profiles(): void
     {
         $dutyManager = $this->userWithRole('duty_manager');

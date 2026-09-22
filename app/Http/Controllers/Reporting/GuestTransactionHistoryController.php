@@ -58,6 +58,32 @@ class GuestTransactionHistoryController extends Controller
 
             fputcsv($handle, ['Stay', 'Room', 'Check-in', 'Check-out', 'Date', 'Type', 'Description', 'Amount', 'Method', 'Account', 'Staff', 'Voided']);
 
+            // Correction (found live, "don't forget the inbuilt guest
+            // transaction history"): reservation deposits (and their
+            // refunds) sit outside any stay's folio — a reservation that
+            // never reached check-in never gets one — so this export
+            // used to omit them entirely, even the receipt. Written
+            // first, ahead of the per-stay rows, since a deposit is
+            // typically the earliest money in this guest's history.
+            foreach ($report['deposit_payments'] as $payment) {
+                $isRefund = $payment->source_module === 'reservation_deposit_refund';
+
+                fputcsv($handle, [
+                    '—',
+                    '—',
+                    '',
+                    '',
+                    $payment->recorded_at->toDateTimeString(),
+                    $isRefund ? 'deposit_refund' : 'deposit_received',
+                    $isRefund ? 'Reservation deposit refunded' : 'Reservation deposit received',
+                    $isRefund ? -$payment->amount : $payment->amount,
+                    $payment->method,
+                    $payment->financialAccount->name ?? '',
+                    $payment->recordedBy->name ?? '',
+                    'No',
+                ]);
+            }
+
             foreach ($report['stays'] as $stayReport) {
                 $stay = $stayReport['stay'];
 

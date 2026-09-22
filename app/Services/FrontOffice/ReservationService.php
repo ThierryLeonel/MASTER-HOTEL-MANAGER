@@ -13,6 +13,7 @@ use App\Services\AuditLogger;
 use App\Services\PaymentLedgerService;
 use Database\Seeders\WebsiteBookingSeeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
@@ -85,7 +86,36 @@ class ReservationService
         $category = RoomCategory::where('is_active', true)->findOrFail($data['room_category_id']);
 
         return DB::transaction(function () use ($data, $category) {
-            $systemUser = User::where('email', WebsiteBookingSeeder::EMAIL)->firstOrFail();
+            // Production incident, found live (a guest-facing 404 on
+            // every website booking submission): this used to be
+            // ->firstOrFail(), which throws ModelNotFoundException — and
+            // Laravel's own default exception handler renders THAT as a
+            // plain HTTP 404, with no hint anywhere that the real cause
+            // was a missing system user, not a missing route. Root cause
+            // on the live install that hit this: only
+            // `db:seed --class=RolesAndPermissionsSeeder` had ever been
+            // run there, not the full `db:seed`, so `WebsiteBookingSeeder`
+            // (added in a later phase than the original seed) never ran
+            // and this account was never created. That's exactly the
+            // class of drift a `firstOrFail()` here can never recover
+            // from on its own. Self-heals instead, using the identical
+            // values WebsiteBookingSeeder::run() creates — so a website
+            // submission never 404s for this reason again, regardless of
+            // seeding history, and a subsequent real run of the seeder
+            // (or a second concurrent request racing this one) is a
+            // harmless no-op against the same firstOrCreate lookup.
+            $systemUser = User::firstOrCreate(
+                ['email' => WebsiteBookingSeeder::EMAIL],
+                [
+                    'name' => 'Website Booking',
+                    'username' => 'website-booking',
+                    'auth_type' => 'password_only',
+                    'password' => Hash::make(Str::random(64)),
+                    'department_id' => null,
+                    'is_active' => false,
+                    'email_verified_at' => now(),
+                ]
+            );
 
             $guest = Guest::where('phone', $data['phone'])->first();
             if (! $guest) {

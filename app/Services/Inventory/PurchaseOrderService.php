@@ -79,6 +79,27 @@ class PurchaseOrderService
             throw new HmsException("Only a submitted purchase order can be approved (current status: {$po->status}).");
         }
 
+        // Added when the Accountant role gained 'manage-purchase-orders'
+        // (create) alongside the 'approve-purchase-order' it already
+        // held — until then this was never reachable, because no role
+        // held both permissions at once except Owner/General Manager via
+        // $all. ExpenseService::approve()'s own docblock already
+        // documented the intended system-wide rule this closes a gap
+        // against: "every other approval pair in this system
+        // deliberately withholds the approve-tier from whoever holds the
+        // request-tier ... (purchase orders, refunds, payroll,
+        // accounting-day lock all do this already)" — true by role
+        // separation alone before this change, now enforced the same
+        // hard-business-rule way ExpenseService/RefundService already
+        // do: a per-user identity check, unconditional, regardless of
+        // role — so this also now applies to Owner/General Manager, who
+        // previously had no code-level guard against approving a PO they
+        // created themselves (only ever avoided in practice, never
+        // prevented).
+        if ((int) $po->ordered_by === (int) $actor->id) {
+            throw new HmsException('You cannot approve a purchase order you created yourself — ask another eligible approver.');
+        }
+
         $po->update(['status' => 'approved', 'approved_by' => $actor->id, 'approved_at' => now()]);
 
         $this->audit->log('inventory.po_approved', 'inventory', $po, null, $po->toArray(), actor: $actor);

@@ -293,6 +293,32 @@ class RolesAndPermissionsSeeder extends Seeder
             // `record-attendance`, which is Owner/GM-only below).
             'accountant' => [
                 'view-audit-log', 'post-folio-payment', 'void-folio-transaction',
+                // Direct request ("I want the accountant to be able to
+                // create purchase order, have access to employee, so as
+                // to create employee and also the suppliers too"):
+                // 'manage-purchase-orders' (create/submit/cancel a PO —
+                // Duty Manager already holds this), 'manage-suppliers'
+                // (create/edit suppliers — also Duty Manager already),
+                // and 'manage-employees' (create/terminate an employee
+                // record — previously nobody but Owner/GM, even though
+                // the accountant already held 'manage-payroll' and could
+                // see HR reports; consistent with the "HR visibility
+                // restriction" comment further down, which already scopes
+                // all HR access to Owner/GM/Accountant only). The
+                // accountant already held 'approve-purchase-order', so
+                // granting 'manage-purchase-orders' too means an
+                // accountant can now both create and approve a PO — the
+                // exact same-role combination ExpenseService::approve()'s
+                // own docblock already flags as something this system
+                // deliberately prevents everywhere else (purchase
+                // orders were named there specifically, previously true
+                // only by role separation, not by a code guard). Rather
+                // than leave that gap open now that a single role can
+                // hit it, PurchaseOrderService::approve() gained the
+                // same per-user (not per-role) self-approval guard
+                // ExpenseService/RefundService already use — so this is
+                // safe the same way 'manage-expenses' already is below.
+                'manage-purchase-orders', 'manage-suppliers', 'manage-employees',
                 'approve-purchase-order',
                 // Follow-up round ("the accountant is should be able to
                 // make expense entries too, disbursement entries, payment

@@ -95,6 +95,73 @@ class GuestTransactionHistoryTest extends TestCase
         $this->assertSame('15000.00', $report['deposit_payments']->first()->amount);
     }
 
+    /**
+     * Correction (found live, ticket: "don't forget the inbuilt guest
+     * transaction history"): a reservation deposit's later refund —
+     * ReservationService::disposeDeposit('refunded'), the mechanism
+     * behind the "Refund to guest" action on a rejected/cancelled
+     * reservation's show page — used to be completely invisible here.
+     * The deposit RECEIPT always showed (source_module
+     * 'reservation_deposit'); the refund (source_module
+     * 'reservation_deposit_refund', direction 'out') was queried
+     * nowhere — on the screen, in the print view, or in the CSV export.
+     * A guest paid a deposit, was refunded, and this report still showed
+     * only money received, never paid back.
+     */
+    public function test_a_refunded_reservation_deposit_shows_up_in_the_guest_transaction_history_alongside_the_receipt(): void
+    {
+        $this->openShiftFor('FO');
+        $guest = Guest::factory()->create();
+        $category = \App\Models\RoomCategory::factory()->create(['is_active' => true]);
+        $actor = $this->userWithRole('general_manager');
+
+        $reservation = \App\Models\Reservation::factory()->create([
+            'guest_id' => $guest->id,
+            'room_category_id' => $category->id,
+            'status' => 'pending',
+            'source' => 'website',
+            'deposit_claimed_amount' => 20000,
+            'deposit_claimed_method' => 'mobile_money',
+            'deposit_reference' => 'MTN TX1',
+        ]);
+
+        $service = app(\App\Services\FrontOffice\ReservationService::class);
+        $service->verifyWebsiteDeposit($reservation, $actor, $this->financialAccount('CASH')->id);
+        $service->reject($reservation->fresh(), $actor, 'Room type no longer available for those dates');
+        $service->disposeDeposit($reservation->fresh(), 'refunded', $actor, financialAccountId: $this->financialAccount('CASH')->id);
+
+        $report = app(GuestTransactionHistoryService::class)->report($guest);
+
+        $this->assertCount(2, $report['deposit_payments']);
+        $modules = $report['deposit_payments']->pluck('source_module')->all();
+        $this->assertContains('reservation_deposit', $modules);
+        $this->assertContains('reservation_deposit_refund', $modules);
+
+        $refundRow = $report['deposit_payments']->firstWhere('source_module', 'reservation_deposit_refund');
+        $this->assertEquals(20000, $refundRow->amount);
+        $this->assertSame('out', $refundRow->direction);
+
+        // And it actually renders on the screen the staff/guest-facing
+        // report uses, not just in the service's return array.
+        $viewer = $this->userWithRole('accountant');
+        $response = $this->actingAs($viewer)->get(route('reports.guest-transaction-history.show', $guest));
+        $response->assertOk();
+        $response->assertSee('Reservation deposit activity');
+        $response->assertSee('Refunded');
+        $response->assertSee('Received');
+
+        // ...and in the print and CSV exports, which used to omit
+        // reservation deposits (receipt or refund) entirely.
+        $printResponse = $this->actingAs($viewer)->get(route('reports.guest-transaction-history.print', $guest));
+        $printResponse->assertOk();
+        $printResponse->assertSee('Reservation deposit activity');
+
+        $csvResponse = $this->actingAs($viewer)->get(route('reports.guest-transaction-history.csv', $guest));
+        $csvResponse->assertOk();
+        $csvResponse->assertSee('deposit_received');
+        $csvResponse->assertSee('deposit_refund');
+    }
+
     public function test_view_guest_history_is_required_and_is_distinct_from_operational_reports(): void
     {
         $guest = Guest::factory()->create();

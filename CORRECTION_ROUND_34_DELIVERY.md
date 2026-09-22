@@ -910,3 +910,142 @@ migrations, interfaces, and permissions above have all been addressed and static
 test — old and new — has been written and syntax-verified but not executed, for the disclosed environment
 reason in §5. That execution step is the one explicit, outstanding item before this round is fully closed
 out.
+
+---
+
+## 8. Post-round-34 production fixes: website booking 404 + guest transaction history gaps
+
+Found and fixed after this round was already live, in response to a direct production report: "my online
+reservation form is not responsive to size of device, and it is showing a 404 error when the reservation is
+to come to the system as a reservation record and the payment as a reservation payment that can be refunded
+if the reservation is rejected. Do not forget the inbuilt guest transaction history."
+
+### 8.1 Root cause of the 404: a missing seeded system user, not a routing bug
+
+Diagnosed directly against the live site (not guessed): the public booking form's `action`, the route
+(`POST /book` → `public.booking.store`), and the controller were all confirmed to match exactly — a real
+`POST` submitted straight to the live environment came back a literal `404`, with the response still
+carrying `x-ratelimit-*` headers, proving the request *did* reach and pass through the route's own throttle
+middleware before the 404 was produced. That ruled out a routing mismatch and pointed at something failing
+*inside* the controller/service call.
+
+Actual cause: `ReservationService::createFromWebsite()` attributes every website-sourced reservation to one
+fixed, seeded "Website Booking" system user (`WebsiteBookingSeeder`, `requested_by` is a `NOT NULL` foreign
+key with no logged-in staff member to attribute a public submission to instead). The lookup was
+`User::where('email', WebsiteBookingSeeder::EMAIL)->firstOrFail()` — and Laravel's own default exception
+handler renders a `ModelNotFoundException` as a bare HTTP 404, with nothing anywhere hinting the real cause
+was a missing seeded row rather than a missing page. On this specific live install, only
+`db:seed --class=RolesAndPermissionsSeeder --force` had ever been run (visible in the Laravel Cloud Commands
+history from earlier in this engagement) — never the full `db:seed` — so `WebsiteBookingSeeder`, added in a
+later phase than the original seed, had never actually run there, and this account never existed. Every
+single online booking submission 404'd as a result.
+
+**Immediate live fix (no redeploy needed):** run `php artisan db:seed --class=WebsiteBookingSeeder --force`
+from the Commands tab — it's explicitly idempotent (`firstOrCreate`), so it's safe to run regardless of
+whether this account already exists.
+
+**Permanent code fix:** `createFromWebsite()` now uses `User::firstOrCreate(...)` with the exact same values
+`WebsiteBookingSeeder::run()` creates, instead of `firstOrFail()`. A website booking can no longer 404 for
+this reason, regardless of seeding history — it self-heals the one time it's needed, and a second/concurrent
+submission racing the same lookup is a harmless no-op against the same `firstOrCreate`. Worth checking
+whether any *other* seeder besides `RolesAndPermissionsSeeder` is similarly missing on this install — most
+usefully `FinancialAccountSeeder` (the Cash/Bank/MTN/Orange accounts other flows in §8.3 below depend on) —
+via Administration → Financial Accounts; if none exist, they can be created directly through that screen, no
+seeder required.
+
+Regression coverage: `tests/Feature/Public/WebsiteBookingTest.php` —
+`test_a_booking_still_succeeds_even_if_the_website_booking_system_user_was_never_seeded` (reproduces the
+exact incident directly: deletes the system user, proves submission still succeeds and the account is
+self-healed with the seeder's exact values) and
+`test_the_self_healed_system_user_is_not_duplicated_across_concurrent_or_repeated_submissions`.
+
+### 8.2 "Not responsive to size of device": the form itself checked out — the real issue was the bare 404 page it led to
+
+The form was checked directly against the live site at a 375×812 mobile viewport (every field renders
+single-column, full-width, no overflow — it already uses Tailwind's mobile-first `grid-cols-1 sm:grid-cols-2`
+pattern throughout, with a real viewport meta tag). No responsive-layout defect was found in the form itself.
+
+The far more likely explanation, given §8.1: a guest filling out the form on their phone would submit it,
+hit the 404 from §8.1, and land on Laravel's bare, unbranded, unstyled default error page — which is what
+actually prompted "not responsive on my phone." It wasn't the booking form; it was the page a guest was
+dropped onto after the request failed. Fixed by adding `resources/views/errors/404.blade.php` — a
+standalone, self-contained, mobile-responsive branded page (no `@extends`, no `SettingsService`/DB call of
+any kind, since an error page has to render even in the exact moment something else is broken) with a link
+back to the booking form and the homepage. Laravel picks this up automatically for any 404 anywhere in the
+app, not just this one — no route wiring needed. Covered by
+`test_a_missing_page_renders_the_branded_responsive_404_page`.
+
+Two smaller, unfixed observations from the same pass, noted for a future round rather than acted on now
+(neither is what was reported): the public layout's Tailwind is loaded from a CDN `<script>` rather than a
+compiled asset, so if that CDN is ever slow/blocked the whole page would render unstyled (a broader,
+pre-existing, site-wide characteristic of every public/guest/print layout, not specific to this form); and
+the booking form's `<label>` elements aren't associated to their inputs via matching `id`/`for` attributes,
+which is an accessibility gap for screen readers, not a visual/responsive one.
+
+### 8.3 "The payment as a reservation payment that can be refunded if the reservation is rejected"
+
+This was already fully built, from an earlier correction round (audited defect #8) — not something this
+round added: `ReservationService::disposeDeposit()`, reachable from the reservation's own show page the
+moment a reservation with a paid deposit is cancelled or rejected (a "Deposit disposition required" panel
+appears automatically, offering "Refund to guest" among its options). A refund posts a real, audited ledger
+entry (`sourceModule: 'reservation_deposit_refund'`, direction `out`, from a real `FinancialAccount` — never
+invented or guessed) and is guarded so it can only ever be recorded once per reservation. Nothing needed
+building here; it's confirmed working as designed and cross-checked directly against §8.4 below.
+
+### 8.4 Guest transaction history: the refund side of a reservation deposit was invisible
+
+This is the gap the report's closing line ("do not forget the inbuilt guest transaction history") correctly
+anticipated. `GuestTransactionHistoryService::report()` already surfaced a deposit's *receipt*
+(`source_module: 'reservation_deposit'`) in its own "Reservation deposits received" section — but never
+queried `'reservation_deposit_refund'` at all, on the screen, the print view, or the CSV export. A guest
+transaction history report is the whole point of the feature to be reliable, and could be read as one
+without ever showing that a deposit had actually been paid back.
+
+Fixed by pulling both `source_module` values into the same query (`GuestTransactionHistoryService::report()`),
+renaming the section "Reservation deposit activity" and adding a Type column (Received/Refunded, refund
+amounts shown signed) plus a net-deposits-held line to the on-screen view
+(`resources/views/reports/guest-transaction-history/show.blade.php`); the print view
+(`.../print.blade.php`) gained the same section, which it never had at all before (previously omitted
+reservation deposits entirely, receipt included); and the CSV export
+(`GuestTransactionHistoryController::csv()`) now writes both `deposit_received`/`deposit_refund` rows ahead
+of the per-stay rows, which it also previously omitted entirely. The top four-stat summary
+(charges/payments/refunds/net) was deliberately left untouched — those are derived purely from folio
+transactions and mixing in a differently-signed `Payment` source risked a subtle double-count; the deposit
+section's own net line covers this money on its own terms instead.
+
+Regression coverage:
+`tests/Feature/Reporting/GuestTransactionHistoryTest.php::test_a_refunded_reservation_deposit_shows_up_in_the_guest_transaction_history_alongside_the_receipt`
+— posts a website booking's deposit through the full real lifecycle (verify → reject → refund) and asserts
+the refund appears in the service's return data, the on-screen view, the print view, and the CSV export.
+
+### 8.5 Accountant: purchase orders, suppliers, employees
+
+Direct request: "I want the accountant to be able to create purchase order, have access to employee, so as
+to create employee and also the suppliers too." Three permissions added to the `accountant` role in
+`RolesAndPermissionsSeeder.php`: `manage-purchase-orders` (create/submit/cancel a PO — Duty Manager already
+held this), `manage-suppliers` (create/edit suppliers — Duty Manager already held this too), and
+`manage-employees` (create/terminate an employee record — previously Owner/General-Manager-only, even though
+Accountant already held `manage-payroll` and `view-hr-reports`, and the earlier "HR visibility restriction"
+round had already scoped all HR access down to exactly Owner/GM/Accountant — this closes the one HR
+permission that restriction didn't actually grant Accountant).
+
+One consequence of the first grant needed a real fix, not just a permission add: the accountant already held
+`approve-purchase-order`, so adding `manage-purchase-orders` means an accountant can now both create and
+approve the same PO. `ExpenseService::approve()`'s own docblock already documents that this system
+deliberately prevents exactly this same-role combination everywhere else ("every other approval pair in this
+system deliberately withholds the approve-tier from whoever holds the request-tier ... purchase orders,
+refunds, payroll, accounting-day lock all do this already") — true for purchase orders only by role
+separation until now (Duty Manager created, only Accountant could approve), never enforced in code.
+`PurchaseOrderService::approve()` now carries the same per-user (not per-role) self-approval guard
+`ExpenseService`/`RefundService` already use, so this is safe the same way `manage-expenses` already is.
+This is a hard business rule, unconditional, so it also now applies to Owner/General Manager, who hold both
+permissions via `$all` and previously had no code-level guard against approving a PO they created themselves
+— a genuine, deliberate behavior change alongside the Accountant grant, not limited to it.
+
+Regression coverage: `tests/Feature/Inventory/PurchaseOrderTest.php` —
+`test_the_accountant_can_now_create_and_submit_a_purchase_order`,
+`test_an_accountant_cannot_approve_a_purchase_order_they_created_themselves`,
+`test_a_different_accountant_can_approve_a_purchase_order_created_by_the_first_one`,
+`test_even_an_owner_cannot_approve_a_purchase_order_they_created_themselves`; new
+`tests/Feature/Inventory/SupplierTest.php`; and
+`tests/Feature/Hr/EmployeeTest.php::test_accountant_can_now_onboard_a_staff_member`.
