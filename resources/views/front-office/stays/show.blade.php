@@ -31,6 +31,29 @@
             </div>
         </div>
 
+        @php
+            // Feature request ("a place ... to identify who approved the
+            // discount"): the walk-in exception lets check-in proceed
+            // with a still-PENDING discount approval attached (see
+            // DiscountApprovalService's class docblock) — surfaced here
+            // so anyone opening this stay later can see it hasn't
+            // actually been confirmed yet, not just at the moment of
+            // check-in (the flash message on that page disappears after
+            // one reload).
+            $latestDiscountApproval = $stay->discountApprovals()->whereNull('superseded_at')->latest()->first();
+        @endphp
+        @if ($latestDiscountApproval && $latestDiscountApproval->status !== 'approved')
+            <div class="rounded-lg border-2 {{ $latestDiscountApproval->status === 'rejected' ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50' }} p-4 text-sm">
+                @if ($latestDiscountApproval->status === 'pending')
+                    <p class="font-semibold text-amber-800">Discounted rate pending approval</p>
+                    <p class="mt-1 text-slate-700">Agreed {{ number_format($latestDiscountApproval->agreed_rate, 0) }} XAF/night vs. standard {{ number_format($latestDiscountApproval->standard_rate, 0) }} XAF/night. Requested by {{ $latestDiscountApproval->requestedBy->name ?? '—' }}, routed to {{ $latestDiscountApproval->requestedApprover->name ?? '—' }} for confirmation. Reason: {{ $latestDiscountApproval->reason }}</p>
+                @else
+                    <p class="font-semibold text-red-800">Discounted rate was rejected</p>
+                    <p class="mt-1 text-slate-700">{{ $latestDiscountApproval->requestedApprover->name ?? 'The approver' }} rejected this rate: {{ $latestDiscountApproval->rejection_reason }}</p>
+                @endif
+            </div>
+        @endif
+
         {{-- Post-9.8 fix round ("in the guest folio it should carry the
              summaries of the bills to be paid to the different
              departments") — see Folio::departmentSummary()'s docblock. --}}

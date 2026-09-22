@@ -510,6 +510,59 @@ from a CSV zip even though they're present in it, and the audit-log entry.
 
 ---
 
+### 2.9 — Route a walk-in discount to a named approver instead of blocking check-in (out-of-band addition)
+
+A direct request: on the Walk-in Check-in form, give the front desk/receptionist "a place ... to identify
+who approved the discount" when the agreed rate is below the room category's standard rate. Before this,
+that situation simply refused check-in outright (`DiscountApprovalService::authorizeRateForCheckIn()`
+threw) unless the person checking the guest in was themselves an eligible approver (Owner/General
+Manager/Duty Manager/Marketing Manager).
+
+**Why this isn't a bare name-picker.** `DiscountApprovalService`'s own docblock states the rule this whole
+feature was originally built to enforce: *"selecting another employee's name is NOT proof of approval."*
+A dropdown that let the receptionist pick "Owner" and immediately treat the discount as approved would
+have silently reopened audited defect #6 (the exact zero-rate/unauthorized-discount bypass this feature
+closed). Two secure alternatives, and the actual product decision, were put to the client via
+AskUserQuestion before writing any code:
+1. The receptionist selects the approver, who then re-authenticates inline (PIN/password) to prove it's
+   really them — rejected, more friction than wanted.
+2. A bare name selection with no verification — rejected, for the reason above.
+3. **Chosen**: the receptionist selects the eligible approver's name and check-in proceeds immediately;
+   the selected person receives it as a pending item in their own approval queue and must approve or
+   reject it themselves, from their own authenticated session, afterward.
+
+**What actually changed.** `DiscountApprovalService::requestApproval()` already existed (used by the
+reservation-page "Send for approval" action) and already builds exactly this kind of pending, addressed
+record — but its docblock explicitly says *"Never usable to check in immediately; this only creates the
+pending record,"* because a reservation has days of lead time before check-in and there was never a reason
+to relax that for it. A walk-in has no such lead time: the discount decision and the guest at the desk
+happen at the same moment, and the approving manager is very often not the person working the desk. So
+`authorizeRateForCheckIn()` gained one new optional parameter, `$requestedApproverId`, and **only**
+`CheckInService::checkInWalkIn()` ever supplies it:
+- `null` (every reservation-based check-in, and a walk-in where no approver was named): unchanged —
+  throws exactly as before.
+- a user id: calls `requestApproval()` (which independently re-verifies that user actually holds
+  `approve-discount` — a spoofed/bad id fails loudly and rolls back the whole check-in transaction, it
+  never silently proceeds) and returns the resulting **pending** `DiscountApproval` instead of throwing,
+  so check-in's own DB transaction commits.
+
+The named approver acts on it through the exact same "My Discount Approvals" screen
+(`discount-approvals.index` / `.approve` / `.reject`) the reservation flow already uses — no new screen,
+no new permission. The Walk-in Check-in form shows a live JS-driven "Discount approved by" picker the
+moment the entered rate is below the selected room's standard rate (enforced server-side regardless of
+JS), and the Stay page now surfaces a banner while that approval is still pending or if it was rejected,
+so anyone opening the stay later — not just at the moment of check-in — can see it hasn't been confirmed
+yet.
+
+**No migration needed** — `discount_approvals.requested_approver_id`/`status='pending'` already existed
+for the reservation flow; this reuses the same columns and the same `requestApproval()`/`approveRequest()`/
+`rejectRequest()` methods verbatim. 5 new tests in
+`tests/Feature/FrontOffice/WalkInDiscountApprovalRoutingTest.php`, including: still-blocked with no
+approver named (regression), immediate check-in + pending record created, the named approver's queue
+showing and approving it, the transaction rolling back entirely when routed to a non-eligible user id
+(proving the safety net holds inside the new path), and an eligible approver doing their own walk-in
+still self-approving exactly as before.
+
 ## 3. Migration and upgrade instructions
 
 ### 3.1 New migrations in this round (run in this order — they are already correctly timestamped to sort
@@ -588,7 +641,13 @@ New controller/service/view code only — no schema changed and no new permissio
 reuses the existing, already Owner-only `manage-system-data` permission). Nothing beyond a normal code
 deployment is required for it to be usable immediately.
 
-### 3.7 Pre-existing archive defect found and fixed: missing `storage/framework/{cache,sessions,views}`
+### 3.7 Walk-in discount routing (§2.9) requires no migration and no re-seed
+
+Reuses `discount_approvals.requested_approver_id`/`status='pending'`, columns that already existed for the
+reservation-page "Send for approval" action, and the same `requestApproval()`/`approveRequest()`/
+`rejectRequest()` methods verbatim. No new permission. Nothing beyond a normal code deployment is required.
+
+### 3.8 Pre-existing archive defect found and fixed: missing `storage/framework/{cache,sessions,views}`
 placeholder directories — causes a 500 on every page of a genuinely fresh deployment
 
 Not introduced by this round and not a code bug — a packaging gap present in the original `hms-14.zip`
@@ -710,10 +769,11 @@ environment):
 | `tests/Feature/Admin/MarketingManagerRoleTest.php` | Feature 2.5 (10 tests, including 5 direct-unauthorized-request tests). |
 | `tests/Feature/Reporting/GuestTransactionHistoryTest.php` | Feature 2.2 (5 tests). |
 | `tests/Feature/Concurrency/RealDatabaseConcurrencyTest.php` | Defects #1, #32 — real two-process concurrency (3 tests; see §4 for its honest skip condition). |
+| `tests/Feature/FrontOffice/WalkInDiscountApprovalRoutingTest.php` | Feature 2.9 — walk-in discount routing (5 tests, including the transaction-rollback proof for a non-eligible target). |
 | + methods added to existing files | `DeployHelperTest.php` (storage-link) and `SettingsAdminTest.php` (favicon) for §2.7 (1 each); `SystemDataTest.php` (7 tests) for §2.8's Import feature. |
 
-That is **37 new test methods in 6 new files, plus 9 methods added to existing files — 46 new test methods
-this round.** The repository's total test inventory now stands at **84 files / 566 test methods** (a live
+That is **42 new test methods in 7 new files, plus 9 methods added to existing files — 51 new test methods
+this round.** The repository's total test inventory now stands at **85 files / 571 test methods** (a live
 count, not carried forward from an older log).
 
 **Remaining limitation, stated plainly:** none of the above — old or new — has been *executed* in this
@@ -767,6 +827,7 @@ brief's "map to existing role identifiers carefully; do not create duplicate equ
 5. **Test results and limitations** — §5 above (and §4 for the concurrency-specific honesty note).
 6. **Logo/favicon diagnosis and fix** — §2.7 above.
 7. **Master/Owner-only data Import button** — §2.8 above (added after the rest of this round, on request).
+8. **Walk-in discount approver routing** — §2.9 above (added after the rest of this round, on request).
 
 Per the brief's own closing instruction, this is not represented as "complete" on code alone: the code,
 migrations, interfaces, and permissions above have all been addressed and statically verified, and every

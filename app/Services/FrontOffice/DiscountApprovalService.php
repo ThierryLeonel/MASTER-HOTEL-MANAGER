@@ -32,6 +32,23 @@ use Illuminate\Support\Facades\DB;
  * must then separately authenticate their own session and call
  * approveRequest() themselves. No endpoint anywhere accepts a raw
  * approver id as proof of who approved.
+ *
+ * Walk-in exception (explicit product decision, not a relaxation of the
+ * rule above): a reservation gets its discount approved, or sent for
+ * approval, days before check-in ever happens, so blocking check-in
+ * until that's resolved costs nothing. A walk-in has no such lead time —
+ * the discount decision and the guest standing at the desk happen at the
+ * same moment, and the manager who'd approve it is very often not the
+ * person working the desk. For that one case only,
+ * authorizeRateForCheckIn() accepts a $requestedApproverId and, when
+ * given, lets check-in proceed with a PENDING DiscountApproval attached
+ * rather than refusing outright — see that method's own docblock. The
+ * named approver still has to separately authenticate and call
+ * approveRequest()/rejectRequest() themselves; nothing here treats "the
+ * receptionist picked a name" as proof of approval. This path is wired
+ * up only from CheckInService::checkInWalkIn() — the reservation-based
+ * check-in path never passes a $requestedApproverId and keeps blocking
+ * exactly as before.
  */
 class DiscountApprovalService
 {
@@ -209,8 +226,22 @@ class DiscountApprovalService
      * overwhelmingly common case. Otherwise: reuses a still-active,
      * exactly-matching approval already on $approvable if one exists;
      * else, when $actor is personally eligible, self-approves inline
-     * (the front desk manager doing their own check-in); else throws,
-     * instructing the caller to get one of those two in place first.
+     * (the front desk manager doing their own check-in).
+     *
+     * Otherwise, behaviour depends on $requestedApproverId (see the class
+     * docblock's "Walk-in exception"):
+     *   - null (the reservation-based check-in path, and any walk-in
+     *     where the receptionist didn't name an approver): throws,
+     *     exactly as before — check-in does not proceed.
+     *   - a user id: routes the decision to that specific eligible
+     *     approver via requestApproval() (which independently verifies
+     *     they actually hold 'approve-discount' — a bad id here fails
+     *     loudly, it never silently proceeds) and returns the resulting
+     *     PENDING DiscountApproval instead of throwing, so the caller's
+     *     DB transaction commits — a walk-in guest is checked in with an
+     *     outstanding discount approval, which appears in that named
+     *     approver's own queue (DiscountApprovalController::index()) for
+     *     them to approve or reject from their own authenticated session.
      */
     public function authorizeRateForCheckIn(
         Model $approvable,
@@ -221,6 +252,7 @@ class DiscountApprovalService
         float $agreedRate,
         User $actor,
         ?string $reason = null,
+        ?int $requestedApproverId = null,
     ): ?DiscountApproval {
         if (bccomp((string) $agreedRate, (string) $category->base_rate, 2) >= 0) {
             return null;
@@ -247,6 +279,20 @@ class DiscountApprovalService
                 $agreedRate,
                 $actor,
                 $reason ?? 'Approved directly at check-in.',
+            );
+        }
+
+        if ($requestedApproverId !== null) {
+            return $this->requestApproval(
+                $approvable,
+                $category,
+                $roomId,
+                $checkIn,
+                $checkOut,
+                $agreedRate,
+                $actor,
+                User::findOrFail($requestedApproverId),
+                $reason ?? 'Approved verbally at the desk at check-in; routed for confirmation.',
             );
         }
 

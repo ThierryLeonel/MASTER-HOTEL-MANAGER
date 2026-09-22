@@ -143,11 +143,19 @@ class CheckInService
         });
     }
 
-    public function checkInWalkIn(Guest $guest, int $roomId, \DateTimeInterface $expectedCheckOut, float $agreedRate, User $actor, ?int $companyId = null): Stay
-    {
+    public function checkInWalkIn(
+        Guest $guest,
+        int $roomId,
+        \DateTimeInterface $expectedCheckOut,
+        float $agreedRate,
+        User $actor,
+        ?int $companyId = null,
+        ?int $discountApproverId = null,
+        ?string $discountReason = null,
+    ): Stay {
         $this->shiftGate->assertOpenForCode('FO');
 
-        return DB::transaction(function () use ($guest, $roomId, $expectedCheckOut, $agreedRate, $actor, $companyId) {
+        return DB::transaction(function () use ($guest, $roomId, $expectedCheckOut, $agreedRate, $actor, $companyId, $discountApproverId, $discountReason) {
             $room = $this->lockAndValidateRoom($roomId);
 
             $stay = Stay::create([
@@ -169,10 +177,19 @@ class CheckInService
             // Stay) — a walk-in has no Reservation row to attach it to at
             // all. Deliberately runs AFTER Stay::create() (there is
             // nothing else to bind the approval to before it exists) but
-            // still safely inside this same DB transaction: if it throws,
+            // still safely inside this same DB transaction: if it throws
+            // (including "the named approver isn't actually eligible"),
             // the whole transaction — including the Stay row just created
             // above — rolls back, so no half-checked-in walk-in is ever
             // left behind.
+            //
+            // $discountApproverId is the walk-in-only exception described
+            // on DiscountApprovalService's class docblock: when the
+            // receptionist isn't personally eligible to approve the
+            // discount and named a specific eligible approver instead,
+            // check-in proceeds now with a PENDING approval attached
+            // rather than being refused — CheckInController is the only
+            // caller that ever supplies this.
             $this->discountApproval->authorizeRateForCheckIn(
                 $stay,
                 $room->category,
@@ -181,6 +198,8 @@ class CheckInService
                 $expectedCheckOut,
                 (float) $agreedRate,
                 $actor,
+                $discountReason,
+                $discountApproverId,
             );
 
             $folio = $this->openFolio($stay);

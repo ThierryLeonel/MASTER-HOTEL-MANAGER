@@ -59,9 +59,36 @@
         </div>
         <div>
             <label class="block text-sm font-medium mb-1">Agreed rate (per night, XAF)</label>
-            <input type="number" step="0.01" name="agreed_rate" required class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+            <input type="number" step="0.01" name="agreed_rate" id="agreed_rate" required class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
         </div>
     </div>
+
+    {{-- Feature request ("a place where the front desk or receptionist
+         selects to identify who approved the discount"): hidden until the
+         agreed rate entered above is actually below the selected room's
+         standard rate. Picking a name here is a REQUEST, not proof of
+         approval — see DiscountApprovalService's "Walk-in exception"
+         docblock. The guest still gets checked in right away; the named
+         approver gets this in their own approval queue
+         (My Discount Approvals) and must approve or reject it themselves
+         from their own session. --}}
+    <div id="discount_approval_block" class="hidden rounded border border-amber-300 bg-amber-50 p-3 space-y-2">
+        <p class="text-xs font-medium text-amber-800">This rate is below the room's standard rate — an eligible approver must sign off. The guest can still be checked in now; select who approved it and they'll confirm it afterward from their own login.</p>
+        <div>
+            <label class="block text-xs font-medium mb-1">Discount approved by</label>
+            <select name="discount_approver_id" id="discount_approver_id" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+                <option value="">Select an eligible approver…</option>
+                @foreach ($eligibleApprovers as $approverOption)
+                    <option value="{{ $approverOption->id }}">{{ $approverOption->name }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs font-medium mb-1">Reason for this rate</label>
+            <input type="text" name="discount_reason" id="discount_reason" placeholder="e.g. repeat guest, long stay, walk-in negotiation" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+        </div>
+    </div>
+
     {{-- Post-9.8 third fix round (PHASE9_AUDIT_AND_PLAN.md §22): optional —
          a stay billed to a company rolls its debt up under that company. --}}
     <div>
@@ -78,6 +105,27 @@
 
 <script>
 (function () {
+    // Feature request: live-show the "Discount approved by" block the
+    // moment the entered rate is below the selected room's standard
+    // rate, so the receptionist isn't surprised by a validation error
+    // after submitting. This is a UX convenience only — the actual rule
+    // is enforced server-side in CheckInController::walkInStore()
+    // regardless of what this script does or whether JS runs at all.
+    const roomSelect = document.querySelector('select[name="room_id"]');
+    const agreedRateInput = document.getElementById('agreed_rate');
+    const discountBlock = document.getElementById('discount_approval_block');
+
+    function refreshDiscountBlock() {
+        const selectedOption = roomSelect.options[roomSelect.selectedIndex];
+        const standardRate = selectedOption ? parseFloat(selectedOption.getAttribute('data-rate')) : NaN;
+        const agreedRate = parseFloat(agreedRateInput.value);
+        const isDiscount = !isNaN(standardRate) && !isNaN(agreedRate) && agreedRate < standardRate;
+        discountBlock.classList.toggle('hidden', !isDiscount);
+    }
+
+    roomSelect.addEventListener('change', refreshDiscountBlock);
+    agreedRateInput.addEventListener('input', refreshDiscountBlock);
+
     const searchInput = document.getElementById('guest_search');
     const resultsBox = document.getElementById('guest_results');
     const guestIdField = document.getElementById('guest_id');

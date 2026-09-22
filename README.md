@@ -578,7 +578,23 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
-**Fixed: missing `storage/framework/{cache,sessions,views}` placeholder directories — 500 error on every page of a fresh deployment (`CORRECTION_ROUND_34_DELIVERY.md` §3.7)**
+**Walk-in Check-in: route a discounted rate to a named approver instead of blocking check-in (`CORRECTION_ROUND_34_DELIVERY.md` §2.9)**
+- Requested directly: "a place where the front desk or receptionist selects to identify who approved the
+  discount" on the Walk-in Check-in form. Not implemented as a bare name dropdown — this codebase's
+  discount-approval feature was built specifically around the rule "selecting another employee's name is
+  NOT proof of approval," and a plain picker would have quietly reopened that gap. Put the design choice to
+  the client directly; the option chosen was: the receptionist selects an eligible approver (Owner/General
+  Manager/Duty Manager/Marketing Manager) and the guest is checked in immediately, while the selected person
+  gets it as a pending item in their own "My Discount Approvals" queue and must approve or reject it
+  themselves from their own login afterward. Reuses the existing pending-request machinery
+  (`DiscountApprovalService::requestApproval()`) that already backed the reservation page's "Send for
+  approval" action — only walk-in check-in is now allowed to proceed on a still-pending approval; a
+  reservation-based check-in is unaffected and still blocks exactly as before. A user who isn't actually an
+  eligible approver still can't be routed to (the request is independently re-verified and the whole
+  check-in rolls back if it fails). No migration, no new permission. 5 new tests in
+  `tests/Feature/FrontOffice/WalkInDiscountApprovalRoutingTest.php`.
+
+**Fixed: missing `storage/framework/{cache,sessions,views}` placeholder directories — 500 error on every page of a fresh deployment (`CORRECTION_ROUND_34_DELIVERY.md` §3.8)**
 - Found while diagnosing a live "500 Internal Server Error" on `/login` on a brand-new production deploy.
   Root cause was a packaging gap present in the project archive since before this correction round —
   `storage/framework/cache/`, `storage/framework/cache/data/`, and `storage/framework/sessions/` had no
@@ -589,7 +605,7 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
   a raw service call, only via an actual rendered request, which is what made it look like a
   deploy-specific mystery rather than a missing-file gap. Fixed by adding the same `.gitignore` placeholder
   Laravel's own skeleton uses to all three directories (matching the one `storage/framework/testing/`
-  already had), so they now survive packaging. See §3.7 for the live, no-redeploy fix for anyone already
+  already had), so they now survive packaging. See §3.8 for the live, no-redeploy fix for anyone already
   hitting this.
 
 **Master Admin — Data: an Owner-only Import button, mirroring Backup/Export/Reset (`CORRECTION_ROUND_34_DELIVERY.md` §2.8)**
