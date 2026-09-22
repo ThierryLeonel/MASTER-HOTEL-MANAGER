@@ -703,14 +703,58 @@ specific to how Laravel Cloud provisions storage.
    reachable to generate one in the environment this correction round was built in), so Laravel Cloud's own
    build step, which does have real Packagist access, will resolve and lock it on the next deploy with no
    extra action needed.
-2. **On Laravel Cloud itself (dashboard action, not code)**: open the environment → **Resources → Object
-   Storage → Add bucket**, create one with **visibility: Public** (the logo needs to be viewable in a plain
-   `<img>` tag with no signed URL), and set its **disk name to exactly `public`** — matching the name this
-   codebase already uses everywhere (`Storage::disk('public')->...`, `SettingsController::uploadLogo()`,
-   the favicon partial, etc.), so it takes over that disk with **zero code changes**. Per Laravel Cloud's
-   docs, the environment must be **redeployed** after attaching the bucket for it to take effect. After
-   that, re-upload the logo once (whatever the earlier upload attempt actually wrote is on ephemeral local
-   storage and should be treated as lost, not migrated).
+2. **`config/filesystems.php`'s `public` disk is now self-detecting**, rather than depending on Laravel
+   Cloud's dashboard-level "name the bucket's disk `public`" convention actually taking effect. Verified
+   against a live environment that it doesn't reliably: a bucket was created and attached, but a
+   `Storage::disk('public')->getAdapter()` check still resolved to `LocalFilesystemAdapter` afterward —
+   because attaching a bucket in the dashboard cannot retroactively change code that's already deployed; the
+   *old* `config/filesystems.php` (hardcoded `driver: local`, no logic reading any `AWS_*` variable for this
+   disk at all) was still what was running. The disk definition is now:
+   ```php
+   'public' => array_merge(
+       ['visibility' => 'public', 'throw' => false, 'report' => false],
+       env('AWS_BUCKET')
+           ? [
+               'driver' => 's3',
+               'key' => env('AWS_ACCESS_KEY_ID'),
+               'secret' => env('AWS_SECRET_ACCESS_KEY'),
+               'region' => env('AWS_REGION', env('AWS_DEFAULT_REGION')),
+               'bucket' => env('AWS_BUCKET'),
+               'url' => env('AWS_URL'),
+               'endpoint' => env('AWS_ENDPOINT_URL', env('AWS_ENDPOINT')),
+               'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+           ]
+           : [
+               'driver' => 'local',
+               'root' => storage_path('app/public'),
+               'url' => env('APP_URL').'/storage',
+           ]
+   ),
+   ```
+   When `AWS_BUCKET` is present in the environment (i.e. some bucket is attached to this app, however it got
+   there), the `public` disk becomes S3/R2-backed automatically, using `AWS_REGION`/`AWS_ENDPOINT_URL` (the
+   variable names Laravel Cloud's own docs say it injects) with a fallback to the older
+   `AWS_DEFAULT_REGION`/`AWS_ENDPOINT` names for other S3-compatible hosts. When `AWS_BUCKET` is absent —
+   every other hosting target this project supports: shared hosting, a bare VPS, this sandbox — the disk
+   falls back to **exactly** the original local-disk config, byte-for-byte unchanged. The `s3` disk entry
+   got the same `AWS_REGION`/`AWS_ENDPOINT_URL`-with-fallback treatment for consistency, though it wasn't the
+   one causing this bug.
+
+   **Practical effect: the bucket no longer strictly needs to be named `public`.** As long as a bucket is
+   attached to the environment (so `AWS_BUCKET` and friends are present), this logic picks it up for the
+   `public` disk regardless of what disk name was chosen when creating it in the dashboard.
+
+3. **On Laravel Cloud itself (dashboard action, not code)**: open the environment → **Resources → Object
+   Storage → Add bucket** (if not already done), create one with **visibility: Public** (the logo needs to
+   be viewable in a plain `<img>` tag with no signed URL). Deploy this updated code, then **redeploy the
+   environment** (a bucket attached to an already-running deployment, or code deployed after the bucket was
+   attached, both need a fresh deploy to pick up the injected env vars / new code). Then verify with:
+   ```
+   php artisan tinker --execute="echo config('filesystems.default'); echo get_class(Storage::disk('public')->getAdapter());"
+   ```
+   which should now print an S3-flavored adapter class, not `Local\LocalFilesystemAdapter`. Only then
+   re-upload the logo (whatever the earlier upload attempt actually wrote is on ephemeral local storage and
+   should be treated as lost, not migrated).
 
 ---
 

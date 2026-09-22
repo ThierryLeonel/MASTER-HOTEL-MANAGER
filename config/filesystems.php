@@ -38,23 +38,49 @@ return [
             'report' => false,
         ],
 
-        'public' => [
-            'driver' => 'local',
-            'root' => storage_path('app/public'),
-            'url' => env('APP_URL').'/storage',
-            'visibility' => 'public',
-            'throw' => false,
-            'report' => false,
-        ],
+        // Operational finding (CORRECTION_ROUND_34_DELIVERY.md §3.9): on
+        // Laravel Cloud specifically, a plain local-disk write here is not
+        // reliably persisted or servable — that platform expects an
+        // attached Object Storage bucket, connected to the app via a
+        // standard AWS_* env var set (their own docs: "Laravel Cloud
+        // automatically injects FILESYSTEM_DISK and AWS S3-compatible
+        // connection variables" — using AWS_ENDPOINT_URL/AWS_REGION
+        // specifically, not this project's original AWS_ENDPOINT/
+        // AWS_DEFAULT_REGION names, hence the fallback chain below).
+        // Self-detecting rather than switched by a manual flag: when
+        // AWS_BUCKET is present (a bucket has actually been attached),
+        // this disk becomes S3/R2-backed automatically; every other
+        // hosting target this project supports (shared hosting, this
+        // sandbox, a bare VPS) has no AWS_BUCKET set and gets back
+        // EXACTLY the original local-disk behaviour, unchanged.
+        'public' => array_merge(
+            ['visibility' => 'public', 'throw' => false, 'report' => false],
+            env('AWS_BUCKET')
+                ? [
+                    'driver' => 's3',
+                    'key' => env('AWS_ACCESS_KEY_ID'),
+                    'secret' => env('AWS_SECRET_ACCESS_KEY'),
+                    'region' => env('AWS_REGION', env('AWS_DEFAULT_REGION')),
+                    'bucket' => env('AWS_BUCKET'),
+                    'url' => env('AWS_URL'),
+                    'endpoint' => env('AWS_ENDPOINT_URL', env('AWS_ENDPOINT')),
+                    'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+                ]
+                : [
+                    'driver' => 'local',
+                    'root' => storage_path('app/public'),
+                    'url' => env('APP_URL').'/storage',
+                ]
+        ),
 
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
             'secret' => env('AWS_SECRET_ACCESS_KEY'),
-            'region' => env('AWS_DEFAULT_REGION'),
+            'region' => env('AWS_REGION', env('AWS_DEFAULT_REGION')),
             'bucket' => env('AWS_BUCKET'),
             'url' => env('AWS_URL'),
-            'endpoint' => env('AWS_ENDPOINT'),
+            'endpoint' => env('AWS_ENDPOINT_URL', env('AWS_ENDPOINT')),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
             'throw' => false,
             'report' => false,
