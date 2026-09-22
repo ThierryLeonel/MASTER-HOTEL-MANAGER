@@ -578,6 +578,20 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Fixed: missing `storage/framework/{cache,sessions,views}` placeholder directories — 500 error on every page of a fresh deployment (`CORRECTION_ROUND_34_DELIVERY.md` §3.7)**
+- Found while diagnosing a live "500 Internal Server Error" on `/login` on a brand-new production deploy.
+  Root cause was a packaging gap present in the project archive since before this correction round —
+  `storage/framework/cache/`, `storage/framework/cache/data/`, and `storage/framework/sessions/` had no
+  placeholder file, and git/zip both silently drop truly empty directories, so a genuinely fresh checkout
+  never had them. Laravel resolves Blade's compiled-view path via `realpath(storage_path('framework/views'))`,
+  which returns `false` for a missing directory, and the Blade compiler treats that as fatal — throwing on
+  the very first view render of any request, i.e. every page. Not reproducible via `artisan route:list` or
+  a raw service call, only via an actual rendered request, which is what made it look like a
+  deploy-specific mystery rather than a missing-file gap. Fixed by adding the same `.gitignore` placeholder
+  Laravel's own skeleton uses to all three directories (matching the one `storage/framework/testing/`
+  already had), so they now survive packaging. See §3.7 for the live, no-redeploy fix for anyone already
+  hitting this.
+
 **Master Admin — Data: an Owner-only Import button, mirroring Backup/Export/Reset (`CORRECTION_ROUND_34_DELIVERY.md` §2.8)**
 - Requested directly: an import button, restricted to the master/owner account. Added to the same
   Owner-only Master Admin — Data screen as Backup/Export/Reset (same `manage-system-data` permission — no

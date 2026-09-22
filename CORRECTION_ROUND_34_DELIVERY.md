@@ -588,6 +588,39 @@ New controller/service/view code only — no schema changed and no new permissio
 reuses the existing, already Owner-only `manage-system-data` permission). Nothing beyond a normal code
 deployment is required for it to be usable immediately.
 
+### 3.7 Pre-existing archive defect found and fixed: missing `storage/framework/{cache,sessions,views}`
+placeholder directories — causes a 500 on every page of a genuinely fresh deployment
+
+Not introduced by this round and not a code bug — a packaging gap present in the original `hms-14.zip`
+from before this correction round began. Laravel's standard project skeleton ships
+`storage/framework/cache/`, `storage/framework/cache/data/`, `storage/framework/sessions/`, and
+`storage/framework/views/` each containing a placeholder `.gitignore` file (`*` / `!.gitignore`) whose only
+purpose is to keep these otherwise-empty directories present in a git checkout or zip archive — both git
+and `zip -r` silently drop directories that contain nothing at all. This project's archive only ever
+carried that placeholder in `storage/framework/testing/`; the other three were missing entirely.
+
+The failure mode is specific and easy to misdiagnose: `config/view.php` resolves Blade's compiled-view
+cache path as `realpath(storage_path('framework/views'))`, and `realpath()` returns `false` for a path
+that doesn't exist on disk. `Illuminate\View\Compilers\Compiler`'s constructor treats a falsy cache path
+as fatal (`InvalidArgumentException: "Please provide a valid cache path."`), and since the Blade compiler
+is resolved the first time *any* view is rendered, this throws on literally every page — including
+`/login` — on a server where these directories were never created some other way (e.g. by an earlier
+local install, a test run, or a previous deploy). It does **not** reproduce under `php artisan route:list`
+or a raw service call, only once a real request actually renders a view — which is what made this look
+like a mysterious, hard-to-reproduce production-only failure during troubleshooting.
+
+**Fixed in the archive**: `storage/framework/cache/.gitignore`, `storage/framework/cache/data/.gitignore`,
+`storage/framework/sessions/.gitignore`, and `storage/framework/views/.gitignore` have been added,
+matching Laravel's own stock skeleton content, so all four directories now survive packaging and exist on
+a fresh checkout.
+
+**If you already deployed before this fix and are seeing a 500 on every page**: this can be resolved
+immediately, live, with no redeploy and no data risk, by creating the missing directories directly on the
+server — e.g. via a one-off `php artisan tinker --execute="..."` call using
+`Illuminate\Support\Facades\File::ensureDirectoryExists(storage_path('framework/views'))` (and the same
+for `framework/sessions` and `framework/cache/data`). Config isn't cached by default, so the fix takes
+effect on the very next request with no restart required.
+
 ---
 
 ## 4. Real database concurrency testing (defects #1, #32)
