@@ -1049,3 +1049,32 @@ Regression coverage: `tests/Feature/Inventory/PurchaseOrderTest.php` —
 `test_even_an_owner_cannot_approve_a_purchase_order_they_created_themselves`; new
 `tests/Feature/Inventory/SupplierTest.php`; and
 `tests/Feature/Hr/EmployeeTest.php::test_accountant_can_now_onboard_a_staff_member`.
+
+### 8.6 Owner: edit and delete rooms
+
+Direct request: "I want the owner to have the access to delete and update room details, that is room numbers,
+descriptions etc." Before this, a room could only ever be added (`manage-rooms`) or have its status changed —
+there was no way to fix a typo'd room number, move a room to another category, or record a description at all.
+
+- New permission `edit-room-details`, **Owner-only** (excluded from General Manager's `$all` grant exactly like
+  `manage-system-data`; Duty Manager keeps `manage-rooms` for adding rooms, unchanged).
+- `PUT /rooms/{room}` (`rooms.update`): edits room number, category, floor, description (`notes`), and the
+  Active flag. Audited (`room.updated`, before/after). Renaming is always allowed — history reads the number
+  through the room relation. Changing the category, or deactivating, is refused while a guest is checked in or
+  while an upcoming (pending/approved/confirmed) reservation is assigned to the room.
+- `DELETE /rooms/{room}` (`rooms.destroy`): only for a room with **no history** — no stays, reservations (any
+  status), housekeeping tasks, maintenance tickets, breakfast entitlements, or discount approvals. Anything
+  else would either be blocked by the database or silently strip the room off historical records, so the
+  Owner gets a clear message to deactivate it instead (an inactive room is already refused by check-in and
+  availability logic; it's now also hidden from the walk-in room dropdown). Audited (`room.deleted`). On a
+  two-node hybrid install, the sync engine does not propagate hard deletes, so delete on each node.
+- Room board (`front-office/rooms/index.blade.php`): each room card shows floor, description, and an
+  "Inactive" badge; the Owner gets an "Edit room" panel with the edit form and a Delete button (confirm
+  prompt). Room *category* names, descriptions, and rates were already editable under Administration → Room
+  Categories.
+
+No migration (the `notes`/`is_active` columns already existed). Re-run
+`php artisan db:seed --class=RolesAndPermissionsSeeder --force` once to create the permission row (the Owner
+passes every permission check regardless, so it works immediately either way). Tests:
+`tests/Feature/FrontOffice/RoomEditDeleteTest.php` (12 cases incl. forbidden for GM/Duty Manager/Accountant/
+Front Desk/Cashier).

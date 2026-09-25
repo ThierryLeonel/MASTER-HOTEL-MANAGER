@@ -578,6 +578,12 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Owner can now edit and delete rooms (`CORRECTION_ROUND_34_DELIVERY.md` §8.6)**
+- New Owner-only `edit-room-details` permission: edit a room's number, category, floor, description, and
+  active flag from the room board; delete a room only if it has never been used (otherwise deactivate it).
+  Category change/deactivation is refused while a guest is in the room or an upcoming reservation is
+  assigned to it. Audited.
+
 **Accountant: can now create purchase orders, suppliers, and employee records (`CORRECTION_ROUND_34_DELIVERY.md` §8.5)**
 - Direct request: "I want the accountant to be able to create purchase order, have access to employee, so as
   to create employee and also the suppliers too." Added `manage-purchase-orders`, `manage-suppliers`, and

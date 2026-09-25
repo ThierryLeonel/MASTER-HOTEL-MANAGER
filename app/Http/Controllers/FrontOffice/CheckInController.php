@@ -40,7 +40,7 @@ class CheckInController extends Controller
      */
     public function walkInForm(Request $request)
     {
-        $availableRooms = Room::where('status', 'available')->with('category')->get();
+        $availableRooms = Room::where('status', 'available')->where('is_active', true)->with('category')->get();
         $prefillGuest = $request->filled('guest_id') ? Guest::find($request->query('guest_id')) : null;
         $companies = Company::where('is_active', true)->orderBy('name')->get();
 

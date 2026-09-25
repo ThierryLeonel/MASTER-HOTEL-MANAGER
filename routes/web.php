@@ -132,6 +132,11 @@ Route::middleware('auth')->group(function () {
     Route::prefix('rooms')->name('rooms.')->group(function () {
         Route::get('/', [RoomController::class, 'index'])->middleware('permission:view-rooms')->name('index');
         Route::post('/', [RoomController::class, 'store'])->middleware('permission:manage-rooms')->name('store');
+        // Owner-only edit/delete of an existing room — see
+        // 'edit-room-details' in RolesAndPermissionsSeeder and
+        // RoomController::update()/destroy().
+        Route::put('/{room}', [RoomController::class, 'update'])->middleware('permission:edit-room-details')->name('update');
+        Route::delete('/{room}', [RoomController::class, 'destroy'])->middleware('permission:edit-room-details')->name('destroy');
         // Post-9.8 fix round: lets front_desk (and anyone else holding
         // 'update-room-status') flip a room's status straight from the
         // room board — see RoomController::updateStatus()'s docblock.

@@ -181,6 +181,18 @@ class RolesAndPermissionsSeeder extends Seeder
         // unreachable by anyone. A genuinely new permission here, granted
         // to Owner/General Manager/Duty Manager below.
         'reverse-breakfast-entitlement',
+        // Direct request ("I want the owner to have the access to delete
+        // and update room details, that is room numbers, descriptions
+        // etc"): editing an existing room (number, category, floor,
+        // description/notes, active flag) and deleting one. Deliberately
+        // separate from 'manage-rooms' (which only ever meant "add a new
+        // room" and is also held by General Manager and Duty Manager),
+        // and Owner-only exactly like 'manage-system-data' — excluded
+        // from General Manager's $all grant below. Deleting is further
+        // limited in RoomController::destroy() to rooms with no history
+        // at all; a room that has ever had a stay/reservation/etc. can
+        // only be deactivated, never erased.
+        'edit-room-details',
     ];
 
     public function run(): void
@@ -228,7 +240,9 @@ class RolesAndPermissionsSeeder extends Seeder
             // full-data-reset button is deliberately Owner-only, not
             // "every back-office role" like the rest of this array. See
             // that permission's own comment in PERMISSIONS above.
-            'general_manager' => array_values(array_diff($all, ['manage-own-shift', 'manage-system-data'])),
+            // 'edit-room-details' is Owner-only on request, same as
+            // 'manage-system-data' — see its comment in PERMISSIONS.
+            'general_manager' => array_values(array_diff($all, ['manage-own-shift', 'manage-system-data', 'edit-room-details'])),
             'duty_manager' => [
                 'approve-reservation', 'manage-reservations', 'manage-guests',
                 'view-rooms', 'manage-rooms', 'update-room-status', 'checkin-guest', 'checkout-guest',
