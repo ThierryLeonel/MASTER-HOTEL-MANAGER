@@ -1,6 +1,6 @@
 @extends('layouts.print')
-@section('title', 'Cash Disbursement Voucher — ' . $disbursement->disbursement_number)
-@section('document-title', 'Cash Disbursement Voucher')
+@section('title', 'Finance Disbursement Voucher — ' . $disbursement->disbursement_number)
+@section('document-title', 'Finance Disbursement Voucher')
 @section('content')
 
 <table class="w-full text-sm mb-6">
@@ -10,6 +10,10 @@
         <tr><td class="py-2 text-slate-500">Department</td><td class="py-2">{{ $disbursement->department->name ?? '—' }}</td></tr>
         <tr><td class="py-2 text-slate-500">Paid to</td><td class="py-2 font-medium">{{ $disbursement->paid_to }}</td></tr>
         <tr><td class="py-2 text-slate-500">Purpose</td><td class="py-2">{{ $disbursement->purpose }}</td></tr>
+        @if ($disbursement->expense)
+            <tr><td class="py-2 text-slate-500">Related expense</td><td class="py-2">{{ $disbursement->expense->expense_number }} — {{ $disbursement->expense->category }}</td></tr>
+        @endif
+        <tr><td class="py-2 text-slate-500">Financial account</td><td class="py-2">{{ $disbursement->financialAccount->name ?? '—' }}</td></tr>
         <tr><td class="py-2 text-slate-500">Method</td><td class="py-2">{{ str_replace('_', ' ', $disbursement->method) }}</td></tr>
         <tr><td class="py-2 text-slate-500">Authorization</td><td class="py-2">{{ $disbursement->authorizationLabel() }}</td></tr>
         <tr><td class="py-2 text-slate-500">Recorded by</td><td class="py-2">{{ $disbursement->recordedBy->name }}</td></tr>

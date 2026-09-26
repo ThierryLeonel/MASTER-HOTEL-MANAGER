@@ -13,7 +13,29 @@
                             <span class="rounded bg-slate-100 px-2 py-0.5 text-xs ml-2">inactive</span>
                         @endunless
                     </div>
-                    <span class="text-xs text-slate-500">{{ str_replace('_', ' ', $type->calculation_method) }}</span>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-slate-500">{{ str_replace('_', ' ', $type->calculation_method) }}</span>
+                        <details class="text-xs">
+                            <summary class="cursor-pointer text-slate-600 underline">Edit</summary>
+                            <form method="POST" action="{{ route('hr.payroll-deductions.update', $type) }}" class="mt-2 w-64 space-y-1">
+                                @csrf @method('PUT')
+                                <input name="name" value="{{ $type->name }}" required class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                                <input name="code" value="{{ $type->code }}" required class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                                <select name="calculation_method" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                                    <option value="flat_percent" @selected($type->calculation_method === 'flat_percent')>Flat percentage</option>
+                                    <option value="progressive_brackets" @selected($type->calculation_method === 'progressive_brackets')>Progressive brackets</option>
+                                </select>
+                                <input type="number" step="0.01" min="0" max="100" name="flat_rate_percent" value="{{ $type->flat_rate_percent }}" placeholder="Flat rate %" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                                <label class="flex items-center gap-1"><input type="checkbox" name="is_active" value="1" @checked($type->is_active)> Active</label>
+                                <button class="w-full rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700">Save</button>
+                            </form>
+                            <form method="POST" action="{{ route('hr.payroll-deductions.destroy', $type) }}" class="mt-1"
+                                  onsubmit="return confirm(@js('Delete deduction type '.$type->name.' permanently? Its brackets will be deleted too.'));">
+                                @csrf @method('DELETE')
+                                <button class="text-red-700 hover:underline">Delete</button>
+                            </form>
+                        </details>
+                    </div>
                 </div>
 
                 @if ($type->calculation_method === 'flat_percent')
@@ -21,7 +43,7 @@
                 @else
                     <table class="w-full text-sm mt-2">
                         <thead class="text-left text-xs uppercase text-slate-500">
-                            <tr><th class="py-1">From</th><th class="py-1">To</th><th class="py-1 text-right">Rate</th></tr>
+                            <tr><th class="py-1">From</th><th class="py-1">To</th><th class="py-1 text-right">Rate</th><th class="py-1"></th></tr>
                         </thead>
                         <tbody class="divide-y">
                             @forelse ($type->brackets as $bracket)
@@ -29,9 +51,26 @@
                                     <td class="py-1">{{ number_format($bracket->min_amount, 0) }}</td>
                                     <td class="py-1">{{ $bracket->max_amount !== null ? number_format($bracket->max_amount, 0) : 'and above' }}</td>
                                     <td class="py-1 text-right">{{ $bracket->rate_percent }}%</td>
+                                    <td class="py-1 text-right whitespace-nowrap">
+                                        <details class="inline-block">
+                                            <summary class="cursor-pointer text-xs text-slate-600 underline">Edit</summary>
+                                            <form method="POST" action="{{ route('hr.payroll-deductions.brackets.update', $bracket) }}" class="mt-1 flex gap-1">
+                                                @csrf @method('PUT')
+                                                <input type="number" step="0.01" min="0" name="min_amount" value="{{ $bracket->min_amount }}" required class="w-20 rounded border border-slate-300 px-1 py-0.5 text-xs">
+                                                <input type="number" step="0.01" min="0" name="max_amount" value="{{ $bracket->max_amount }}" class="w-20 rounded border border-slate-300 px-1 py-0.5 text-xs">
+                                                <input type="number" step="0.01" min="0" max="100" name="rate_percent" value="{{ $bracket->rate_percent }}" required class="w-16 rounded border border-slate-300 px-1 py-0.5 text-xs">
+                                                <button class="rounded bg-slate-800 px-2 py-0.5 text-xs text-white">Save</button>
+                                            </form>
+                                            <form method="POST" action="{{ route('hr.payroll-deductions.brackets.destroy', $bracket) }}" class="mt-1"
+                                                  onsubmit="return confirm('Delete this bracket?');">
+                                                @csrf @method('DELETE')
+                                                <button class="text-xs text-red-700 hover:underline">Delete</button>
+                                            </form>
+                                        </details>
+                                    </td>
                                 </tr>
                             @empty
-                                <tr><td class="py-1 text-slate-500" colspan="3">No brackets defined yet.</td></tr>
+                                <tr><td class="py-1 text-slate-500" colspan="4">No brackets defined yet.</td></tr>
                             @endforelse
                         </tbody>
                     </table>

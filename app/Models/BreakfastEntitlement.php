@@ -15,7 +15,7 @@ class BreakfastEntitlement extends Model
 {
     protected $fillable = [
         'stay_id', 'room_id', 'business_date', 'served_at', 'served_by',
-        'order_id', 'order_item_id', 'menu_item_id',
+        'order_id', 'order_item_id', 'menu_item_id', 'delivered_to_room',
         'reversed_at', 'reversed_by', 'reversal_reason',
     ];
 
@@ -25,6 +25,7 @@ class BreakfastEntitlement extends Model
             'business_date' => 'date',
             'served_at' => 'datetime',
             'reversed_at' => 'datetime',
+            'delivered_to_room' => 'boolean',
         ];
     }
 

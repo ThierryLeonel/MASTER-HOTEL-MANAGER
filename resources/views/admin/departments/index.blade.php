@@ -6,7 +6,7 @@
     <a href="{{ route('admin.departments.create') }}" class="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">+ New department</a>
 </div>
 
-<div class="overflow-hidden rounded-lg bg-white shadow-sm">
+<div class="overflow-x-auto rounded-lg bg-white shadow-sm">
     <table class="w-full text-sm">
         <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
             <tr>
@@ -45,6 +45,12 @@
                                 <button class="text-green-600 hover:underline">Reactivate</button>
                             </form>
                         @endif
+                        <form method="POST" action="{{ route('admin.departments.destroy', $department) }}" class="inline"
+                              onsubmit="return confirm(@js('Delete department '.$department->name.' permanently? Only a department with no history at all can be deleted — otherwise deactivate it instead.'));">
+                            @csrf
+                            @method('DELETE')
+                            <button class="text-red-700 hover:underline">Delete</button>
+                        </form>
                     </td>
                 </tr>
             @endforeach

@@ -11,7 +11,7 @@ class CashDisbursement extends Model
 
     protected $fillable = [
         'disbursement_number', 'ticket_id', 'department_id', 'amount',
-        'paid_to', 'purpose', 'method', 'financial_account_id', 'authorized_by_user_id',
+        'paid_to', 'purpose', 'expense_id', 'method', 'financial_account_id', 'authorized_by_user_id',
         'authorized_by_name', 'authorized_by_title', 'recorded_by',
         'disbursed_at', 'notes',
     ];
@@ -37,6 +37,11 @@ class CashDisbursement extends Model
     public function financialAccount()
     {
         return $this->belongsTo(FinancialAccount::class);
+    }
+
+    public function expense()
+    {
+        return $this->belongsTo(Expense::class);
     }
 
     public function authorizedByUser()

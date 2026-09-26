@@ -42,7 +42,7 @@
     </div>
 
     <div class="lg:col-span-2">
-        <div class="overflow-hidden rounded-lg bg-white shadow-sm">
+        <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
             <table class="w-full text-sm">
                 <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
                     <tr><th class="p-3">Date</th><th class="p-3">Payment #</th><th class="p-3">Guest / payer</th><th class="p-3">Account</th><th class="p-3 text-right">Amount</th><th class="p-3">By</th></tr>

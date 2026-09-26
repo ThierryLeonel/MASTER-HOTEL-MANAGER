@@ -26,9 +26,23 @@
     <div class="col-span-1">
         <form method="POST" action="{{ route('inventory.goods-receipts.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             @csrf
-            <div class="text-xs font-medium">Ad-hoc receipt (no purchase order)</div>
+            <div class="text-xs font-medium">Record a receipt</div>
+            {{--
+                "Goods received should be able to ref purchase orders for
+                proper accountability": picking a PO here matches each line
+                below to that PO's own item (by product) so quantity_received
+                bookkeeping on the PO stays correct, exactly as if this had
+                been received from the PO's own page. Leave it unset for a
+                genuinely ad-hoc delivery that never had a PO.
+            --}}
+            <select name="purchase_order_id" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+                <option value="">No purchase order (ad-hoc)…</option>
+                @foreach ($openPurchaseOrders as $po)
+                    <option value="{{ $po->id }}">{{ $po->po_number }} — {{ $po->supplier->name ?? 'no supplier' }}</option>
+                @endforeach
+            </select>
             <select name="supplier_id" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
-                <option value="">Supplier (optional)…</option>
+                <option value="">Supplier (optional, if not receiving against a PO)…</option>
                 @foreach ($suppliers as $supplier)
                     <option value="{{ $supplier->id }}">{{ $supplier->name }}</option>
                 @endforeach

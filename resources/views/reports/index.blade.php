@@ -66,6 +66,10 @@
             <div class="font-medium">Inventory</div>
             <p class="text-sm text-slate-500">Current stock valuation, wastage cost, and low-stock products.</p>
         </a>
+        <a href="{{ route('reports.purchases') }}" class="block rounded-lg bg-white p-4 shadow-sm hover:shadow">
+            <div class="font-medium">Purchases</div>
+            <p class="text-sm text-slate-500">Purchase orders raised vs. goods actually received over a date range, plus ad-hoc receipts — printable, and exportable as CSV.</p>
+        </a>
     @endcan
     @can('view-hr-reports')
         <a href="{{ route('reports.hr') }}" class="block rounded-lg bg-white p-4 shadow-sm hover:shadow">

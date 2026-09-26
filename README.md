@@ -578,6 +578,42 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Scrolling, auto-numbering, breakfast CRUD, purchase reports, and a financial-linking audit (`CORRECTION_ROUND_34_DELIVERY.md` §9)**
+- Nine separate requests in one round — see §9 for the full write-up; §9.9 is a direct audit of the
+  "double records" concern and is worth reading in full if you're reviewing this round's finance changes.
+- Sidebar no longer disappears on a long page at desktop widths — the nav and content pane now scroll
+  independently, fixed once in the shared layout so it applies to every module automatically (§9.1).
+- Facility codes and Product SKUs are now generated automatically instead of freehand-typed; a Folio now
+  carries a real `invoice_number`, generated at check-in and printed on the invoice (§9.2).
+- Complimentary breakfast gained Edit and Delete buttons, plus a "delivered to room" flag — "Delete" restores
+  the stock it consumed but, since it really was served, never frees up a second same-day redemption (§9.3).
+- The general Goods Receipt form can now reference a Purchase Order directly (the schema already supported
+  it; only the ad-hoc form's UI was missing the picker) (§9.4).
+- New Purchase Report (screen/print/CSV) comparing purchase-order value against goods actually received,
+  under Reports → Purchases (§9.5).
+- Cash Disbursement is now labeled Finance Disbursement everywhere in the UI, and can optionally reference
+  the specific Expense it's paying out — without ever posting that payment to the ledger twice (§9.7).
+- A shift now requires declaring its opening cash float, which folds into its expected-closing/variance
+  figures; an open shift's expected balance now updates live on screen every 20 seconds (§9.8).
+- Full audit of financial-account linkage across every money-moving module confirmed a single insert-only
+  ledger with no double-posting risk found; closed the one real gap (a disbursement/expense left with no
+  department doesn't get folded into that department's shift reconciliation, though the money itself was
+  always posted correctly) by defaulting both forms to the actor's own department (§9.9).
+
+**Owner can now edit/delete every category and non-financial master-data record — financial transactions untouched (`CORRECTION_ROUND_34_DELIVERY.md` §8.7)**
+- Direct request: "make sure the owner/main user has the access to edit, delete and update all categories
+  and every input, except financial inputs." Added edit and/or delete to every category and master-data
+  screen that was missing one: Room Category (delete only — edit already existed), Department (delete only),
+  Menu Category, Menu Item, Unit of Measure, Product, Supplier, Facility, Facility Rate, Leave Type (first
+  CRUD screen this table has ever had), and Payroll Deduction Type/Bracket. Guest and Company also gained
+  edit; Guest's "delete" is a reversible soft-delete (`guests.restore` undoes it) so every stay/reservation/
+  payment keeps working unchanged. No new permissions were added — each action reuses the same permission
+  that already gates that entity's own create action, and the Owner already bypasses every permission check
+  regardless. Every actual financial transaction (expenses, refunds, purchase orders, payments, payroll
+  runs, financial accounts) still only exposes its existing controlled workflow — none gained a raw edit or
+  delete. Deleting anything with real history is refused in favor of deactivating it, exactly like the Room
+  board already does. ~30 new/extended tests across 10 test files.
+
 **Owner can now edit and delete rooms (`CORRECTION_ROUND_34_DELIVERY.md` §8.6)**
 - New Owner-only `edit-room-details` permission: edit a room's number, category, floor, description, and
   active flag from the room board; delete a room only if it has never been used (otherwise deactivate it).

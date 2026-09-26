@@ -23,7 +23,8 @@
 @if ($shift->status === 'closed')
     <table class="w-full text-sm mb-4">
         <tbody class="divide-y">
-            <tr><td class="py-2 text-slate-500">Expected cash (from the ledger)</td><td class="py-2 text-right">{{ number_format($shift->expected_cash, 0) }}</td></tr>
+            <tr><td class="py-2 text-slate-500">Opening cash</td><td class="py-2 text-right">{{ $shift->opening_cash !== null ? number_format($shift->opening_cash, 0) : '0 (opened before this was tracked)' }}</td></tr>
+            <tr><td class="py-2 text-slate-500">Expected cash (opening + ledger)</td><td class="py-2 text-right">{{ number_format($shift->expected_cash, 0) }}</td></tr>
             <tr><td class="py-2 text-slate-500">Declared cash (counted &amp; handed in)</td><td class="py-2 text-right">{{ number_format($shift->declared_cash, 0) }}</td></tr>
             <tr class="border-t-2 border-slate-800 font-semibold text-base">
                 <td class="py-2">Variance</td>

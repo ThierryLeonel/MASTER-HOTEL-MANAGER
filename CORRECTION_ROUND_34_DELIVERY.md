@@ -1078,3 +1078,290 @@ No migration (the `notes`/`is_active` columns already existed). Re-run
 passes every permission check regardless, so it works immediately either way). Tests:
 `tests/Feature/FrontOffice/RoomEditDeleteTest.php` (12 cases incl. forbidden for GM/Duty Manager/Accountant/
 Front Desk/Cashier).
+
+### 8.7 Owner: edit/delete extended to every category and master-data screen, financial records left alone
+
+Direct request: "make sure the owner/main user has the access to edit, delete and update all categories and
+every input, except financial inputs." §8.6 above only covered Rooms. Before doing anything, this round
+inventoried the whole app for two things: every "category"/reference-data table (RoomCategory, MenuCategory,
+Unit, LeaveType, PayrollDeductionType/Bracket, Department, Facility/FacilityRate), and every other
+non-financial master-data screen (Guest, Supplier, Product, Company, MenuItem, EmployeeProfile) — checking,
+for each one, whether an actual edit/delete **action** existed at all (a permission check is meaningless if
+there's no route/controller method behind it). Several had create-only screens that had never been touched
+since Phase 1–5; `LeaveType` had no admin screen whatsoever, only a seeder.
+
+**Design decision — why no pile of new permissions.** The Owner already bypasses every permission check
+unconditionally via `Gate::before` in `AppServiceProvider` (`return $user->hasRole('owner') ? true : null;`),
+which was already true before this round. So "make sure the Owner has access" doesn't require a new
+Owner-only permission for each of the dozen-plus entities below — it only requires the edit/delete action to
+*exist*, gated by whatever permission already governs that entity's own create action (`manage-settings` for
+RoomCategory, `manage-departments` for Department, `manage-menu` for the POS menu, `manage-products` for
+Product/Unit, `manage-suppliers` for Supplier, `manage-facilities` for Facility/FacilityRate, `manage-guests`
+for Guest/Company, `manage-employees` for LeaveType/PayrollDeductionType). This exactly mirrors how
+RoomCategory's and Department's own pre-existing `update()` actions already worked (never Owner-exclusive) —
+`edit-room-details` in §8.6 was the one deliberate exception, because the Owner asked for Rooms specifically
+against General Manager, who otherwise holds every operational permission. No such contrast was asked for
+here, so no new permission rows were added at all; the Owner gets everything below immediately, with zero
+reseeding required.
+
+**Design decision — what "except financial inputs" excludes.** Confirmed by inventory that every actual
+financial *transaction* record (`Expense`, `RefundRequest`, `PurchaseOrder`, `Payment`, cash disbursements,
+payroll runs/payslips, `FinancialAccount`) already only exposes a controlled workflow — submit/approve/
+reject/pay/void — never a raw edit or delete, and this round adds none. Two categories of "financial-adjacent"
+master data got extra scrutiny rather than a blanket pass:
+- **PayrollDeductionType/Bracket** are rate *configuration* (same category as RoomCategory's `base_rate`),
+  not a transaction — `payslip_lines` snapshots its own label+amount at generation time with **no foreign
+  key back to `payroll_deduction_types` at all** (confirmed by reading that migration), so editing or
+  deleting a deduction type can never rewrite an already-generated payslip. Treated as an ordinary category.
+- **EmployeeProfile** (`basic_salary`, `payment_method`, `bank_account`) was deliberately left untouched —
+  `EmployeeService::onboard()` already lets `manage-employees` holders update these via the existing "Add /
+  update employee profile" form (an upsert keyed on `user_id`, pre-dating this round), and this round neither
+  restricts nor further opens that path, since doing either was outside what was actually asked. `terminate()`
+  remains the only way to remove an employee record — no employee `destroy()` was added, consistent with
+  "except financial inputs" given payroll/attendance history hangs off this record.
+
+**What actually shipped** (every item follows the same "any real history → deactivate instead of delete"
+rule already established by Room/Department, checked against every foreign key that actually references the
+table — see each controller's own docblock for the exact list per entity):
+
+| Entity | Update | Delete guard |
+|---|---|---|
+| RoomCategory | already had it | blocked by rooms/reservations/discount-approval history |
+| Department | already had it | blocked by staff/requisitions/shifts/**expenses**/disbursements/wastage history (the `nullOnDelete` financial-table checks are why this list is longer than the others) |
+| MenuCategory | new | blocked while it still has menu items |
+| MenuItem | new | blocked by order history, a configured recipe, or breakfast-entitlement history (safe regardless — `order_items` snapshots its own name/price) |
+| Unit | new | blocked while a product still uses it |
+| Product | new | blocked by any purchasing/usage history (8 tables checked) — never touches the FIFO stock ledger itself |
+| Supplier | new | blocked by purchase-order or goods-receipt history |
+| Facility | new | blocked while it has rates or access history |
+| FacilityRate | new (alongside the existing enable/disable toggle) | blocked by access history |
+| LeaveType | new — **first CRUD screen this table has ever had** | blocked by leave-request or accrued-balance history |
+| PayrollDeductionType / Bracket | new | none needed (see above) — brackets cascade with their type |
+| Guest | new | **not a hard delete** — Guest already used `SoftDeletes`; "delete" just removes it from the active list (`guests.restore` reverses it), so every stay/reservation/payment keeps working unchanged and there is nothing to guard |
+| Company | new | blocked by stay or accounts-receivable history (both use `nullOnDelete`, which would otherwise silently strip which company a historical debt was billed to) |
+
+Every update/destroy action is audited (`AuditLogger`, following each module's existing action-naming
+convention) and every controller that lacked `AuditLogger` before now has it injected. UI: each screen's
+existing list view gained an inline "Edit" `<details>` panel and a "Delete" button with a confirm prompt,
+following the exact pattern already used on the Room board (§8.6) — nothing moved to a separate page.
+
+No migration. Regression coverage (new/extended, ~30 cases): `tests/Feature/Admin/RoomCategoryAdminTest.php`,
+`tests/Feature/Admin/DepartmentAdminTest.php`, `tests/Feature/Inventory/ProductAndUnitEditDeleteTest.php`,
+`tests/Feature/Inventory/SupplierTest.php`, `tests/Feature/Pos/MenuEditDeleteTest.php`,
+`tests/Feature/FrontOffice/FacilityEditDeleteTest.php`, `tests/Feature/FrontOffice/GuestEditDeleteTest.php`,
+`tests/Feature/FrontOffice/CompanyEditDeleteTest.php`, `tests/Feature/Hr/LeaveTest.php`,
+`tests/Feature/Hr/PayrollTest.php` — each covers the happy-path edit, at least one blocked-delete case, an
+allowed-delete case, and a role without the entity's permission being forbidden.
+
+## 9. New feature round: scrolling, auto-numbering, breakfast, purchasing, and a financial-linking audit
+
+Nine separate requests arrived in one message. Each is covered below; **9.9 is the important one to read
+in full** — it's a direct audit of the double-recording concern, not just a changelog entry.
+
+### 9.1 Scrolling — the sidebar disappeared on any page taller than the viewport
+
+Root cause (`resources/views/layouts/app.blade.php`): the sidebar was `position: static` at desktop widths
+with no height constraint, so its own `overflow-y-auto` class did nothing — the whole page, nav included,
+scrolled as one unit. Fixed at the shell level (`#app-shell`, `#app-sidebar`, `#app-main`), not per view,
+because every module view extends this one layout: the shell is now pinned to `100vh` on desktop and the
+nav and content panes scroll independently, each sized to whatever that view actually contains. Mobile's
+existing off-canvas overlay is untouched; only its top bar is now `sticky` so the hamburger stays reachable
+on a long page. Also swapped `overflow-hidden` for `overflow-x-auto` on every list view's table wrapper (14
+files) so a wide table scrolls horizontally instead of silently clipping on a narrow screen. No migration.
+
+### 9.2 Automatic numbering — two real gaps closed, one new document number added
+
+An audit (not assumed) of every "number"/"code"/"SKU" field in the app found that **12 of 14** were already
+auto-generated (`PREFIX-Ymd-random` — orders, purchase orders, goods receipts, requisitions, stock counts,
+wastage, expenses, refunds, employees, payments, disbursements, shifts, facility access). Two were genuinely
+manual and are now generated automatically instead:
+
+- **Facility code** (`FacilityController`) — was `required|unique`, freehand-typed. Now derived from the
+  facility's name (`SWIMMINGPO-4F2A` style) and immutable after creation (it's printed on access slips).
+- **Product SKU** (`ProductController`) — was `required|unique` on both create and edit. Now generated from
+  the category (or name) at creation; still editable afterwards, deliberately, since a SKU is a reference
+  code staff may need to align with a supplier's own catalogue, unlike a sequential document number.
+
+"Invoice numbering" had nothing to attach to — there was no Invoice model at all; `stays.invoice.print`
+just rendered the Folio's ledger under the title "Guest Invoice" with no number on it anywhere. Added
+`folios.invoice_number` (nullable, additive), generated once in `CheckInService::openFolio()` and printed
+on the folio/invoice receipt; a folio opened before this deploys shows a `FOLIO-<id>` fallback rather than
+having a number invented for it retroactively. Migration: `2025_02_02_000100_add_invoice_number_to_folios_table`.
+
+### 9.3 Complimentary breakfast — edit/delete buttons, plus a room-delivery flag
+
+`BreakfastEntitlement` already existed as a standalone per-stay-per-day log with a deliberate design rule,
+stated in its own migration and service docblocks: **a delete must never silently restore a used
+entitlement** (the unique `(stay_id, business_date)` key counts every row regardless of reversal). That
+rule predates this round and is not relaxed by it. So:
+
+- **Edit** (new: `BreakfastController::update()` / `BreakfastEntitlementService::update()`): correct
+  today's own, not-yet-reversed redemption's menu item or delivery flag. Same-day-only, matching every
+  other "no rewriting an already-reconciled period" guard in this codebase (e.g. `Shift::close()`).
+  Changing the item reverses the old item's stock and deducts the new one's, so stock never drifts.
+- **Delete** (new: `BreakfastController::destroy()`): a real "Delete" button, but it calls the same audited
+  `reverse()` under the hood rather than hard-deleting the row — restores the stock, but (by the rule
+  above) does not free up a new redemption for that stay that day, since it really was served.
+- **Delivered-to-room flag**: new `breakfast_entitlements.delivered_to_room` boolean (default false,
+  additive), set on the redeem form and editable via the new edit form, shown as a column in the list.
+
+Migration: `2025_02_02_000200_add_room_delivery_to_breakfast_entitlements_table`. The existing reversal
+route/tests (`tests/Feature/Restaurant/BreakfastEntitlementTest.php`) are untouched and still exercised by
+the "Reverse" flow used internally by "Delete"; **no new automated test was added for edit/destroy** in
+this round — see §9.10.
+
+### 9.4 Goods Received ↔ Purchase Order — schema was already linked; the ad-hoc form UI was not
+
+`goods_receipts.purchase_order_id` and `goods_receipt_items.purchase_order_item_id` already existed, and
+`GoodsReceiptService::receive()` already accepted an optional PO and kept `purchase_order_items.quantity_received`
+correct. The actual gap was UX: the general "Goods Receipts" screen's own form (`GoodsReceiptController::store()`)
+had no PO picker at all — only `PurchaseOrderController::receive()`, reached from a specific PO's own page,
+could link one. Added a "Purchase order (optional)" dropdown to the general form; when picked, each
+submitted product line is matched to that PO's own item for the same product so the same accountability
+(quantity_received bookkeeping, partial-delivery tracking) applies here too. No migration — schema already
+supported this.
+
+### 9.5 Purchase reports — built from Purchase Order + Goods Received, as asked
+
+Did not exist at all before this round (confirmed by grep — no controller, service, or view referenced
+`PurchaseOrder`/`GoodsReceipt` for reporting). New `App\Services\Reporting\PurchaseReportService` computes,
+per PO in a date range: ordered value (from `PurchaseOrderItem::line_total`), received value (from
+`GoodsReceiptItem::line_total`, matched via `purchase_order_item_id` — never a separately-maintained
+total), and the outstanding difference; plus ad-hoc receipts (no PO) reported separately. New
+screen/print/CSV routes under `reports.purchases.*` (same `view-inventory-reports` permission as the
+existing Inventory report), linked from the reports index. No migration.
+
+### 9.6 Expenses referencing and reducing a financial account — already fully built
+
+Checked before writing anything: `expenses.financial_account_id` already exists (required at pay time,
+`ExpenseController::pay()`), and `ExpenseService::markPaid()` already posts a single ledger entry against
+it (money "reducing" a financial account in this app is always a computed live sum over `payments`, not a
+stored balance column — see §9.9). This request was already satisfied by the "fourth post-9.8 fix round
+(day-close rebuild)" from an earlier engagement round. No change made; noted here so it isn't mistaken for
+an oversight.
+
+### 9.7 Cash Disbursement → Finance Disbursement
+
+**What changed:** every user-facing label ("Cash Disbursements" nav link, page titles, the printed
+voucher's title, in-app copy) now reads "Finance Disbursement(s)". A disbursement can now optionally
+reference the specific `Expense` it's paying out (new `cash_disbursements.expense_id`, nullable + unique so
+one expense can never attach to two disbursements) — closing the one real gap in "reference ... the
+financial account ... and also the reason, expense, or payment done" (the account and the reason/`purpose`
+were already there).
+
+**What deliberately did NOT change:** the underlying model, table (`cash_disbursements`), route names, and
+PHP class (`CashDisbursement`/`CashDisbursementService`) keep their existing names. This app is already
+deployed to Laravel Cloud from a live GitHub repo — renaming a table/class outright would mean a real
+production schema/route rename with no way to test the migration against production data from this
+sandbox, for a change that's cosmetic once the label is fixed. If a hard rename (table + class + routes)
+is still wanted, it should be a dedicated follow-up round done carefully against a staging copy first, not
+bundled into this one.
+
+**Double-recording guard for the new `expense_id` link** (this matters — see §9.9): linking a disbursement
+to an expense does **not** call `ExpenseService::markPaid()` (which posts its own ledger entry) — that
+would post the money out twice for one real payment. Instead, `CashDisbursementService::disburse()` posts
+the ONE ledger entry itself and then calls a new `ExpenseService::markPaidViaDisbursement()`, which only
+updates the expense's status/attribution columns. The expense must be `approved` (re-checked under a row
+lock, same guard as the ordinary pay flow) and the disbursement amount must equal the expense's amount
+exactly, so the ledger and the expense's own record can never disagree about what was paid.
+
+Migration: `2025_02_02_000300_add_expense_id_to_cash_disbursements_table`.
+
+### 9.8 Shift opening balance + a live expected-balance figure
+
+`shifts.expected_cash` was computed purely from that shift's own ledgered cash payments (in minus out) —
+there was no way to record what the till actually started with, so every shift implicitly assumed it
+opened at zero. New `shifts.opening_cash` (nullable, additive — a shift opened before this deploys is
+treated as having started at 0, exactly the assumption it was already computed under, so no historical
+expected/declared/variance figure changes). `ShiftController::store()` now requires it; `ShiftService::
+expectedCashFor()` now adds it into the running total.
+
+"Let the expected balance ... be visibly changing as the day and transactions are moving": this app has no
+build step and no Livewire (Tailwind loads via CDN — see `layouts/app.blade.php`'s own docblock), so a
+small plain-JS poll against a new `GET finance/shifts/{shift}/expected` JSON endpoint
+(`ShiftController::expected()`, scoped to the caller's own department exactly like the shift list itself)
+refreshes the open-shift row's "Expected" figure every 20 seconds without a page reload. The shift list also
+gained an "Opening" column, and the print voucher now shows opening cash alongside expected/declared/variance.
+
+Migration: `2025_02_02_000400_add_opening_cash_to_shifts_table`. New/updated tests in
+`tests/Feature/Finance/ShiftTest.php`: opening_cash is required at the HTTP layer
+(`test_opening_a_shift_requires_declaring_an_opening_cash_amount`), and a non-zero opening float correctly
+folds into the closing expected/variance figures
+(`test_opening_cash_is_included_in_the_shifts_expected_closing_balance`); every pre-existing test that posts
+to `finance.shifts.store` was updated to pass `opening_cash` so it still reaches the behaviour it was
+actually testing. Two test helpers that call `ShiftService::open()` directly
+(`tests/Concerns/CreatesUsers.php`, `tests/Feature/Concurrency/RealDatabaseConcurrencyTest.php`) were
+updated to pass `0.0` explicitly, since the parameter is no longer optional.
+
+### 9.9 "Correct the financial linking ... so we do not have double records" — audit findings
+
+This was investigated as a full audit before any change was made, specifically for the four account types
+named (Cash Book, MTN MoMo, Orange Money, Bank) and every transaction type that moves money. The findings:
+
+**There is one ledger, and it is insert-only.** Every module that takes or pays out money — Payment
+(guest/POS payments), Expense, CashDisbursement, RefundRequest, PayrollRun/Payslip, Reservation deposits,
+Facility access, Accounts Receivable settlement — calls the same `PaymentLedgerService::record()` rather
+than writing to `payments` directly. A `FinancialAccount`'s "balance" is never a stored column that could
+drift — it's always `opening_balance + Σ(payments.amount, direction)` computed live
+(`FinancialAccountService::currentBalance()`), so there is no separate balance figure that a bug could let
+fall out of sync with the ledger; there is only the ledger.
+
+**Every real entry point already requires picking a specific account, not a generic method.** A "fourth
+post-9.8 fix round (day-close rebuild)" from an earlier engagement round already replaced every bare
+`payment_method` select with a required `financial_account_id` — confirmed by checking every controller
+that moves money (`PaymentController`, `ExpenseController`, `CashDisbursementController`,
+`RefundController`, `PayrollController`, `FacilityAccessController`, `ReservationController`,
+`FolioController`, `AccountsReceivableController`, `OrderController`): each requires (or, where genuinely
+optional — a POS order deferred to a folio, or a wholly complimentary order — conditionally uses) a real,
+active `FinancialAccount`, and `method` is always *derived from* the chosen account
+(`FinancialAccount::paymentMethod()`), never picked independently. So "cash" vs "MTN MoMo" vs "Orange
+Money" vs "Bank" is never ambiguous at the point money is recorded — it's asked once, as which account, not
+as a free-standing payment-method string.
+
+**Guards against double-posting the SAME event are already in place**, checked per transaction type:
+`PaymentLedgerService::record()` supports an idempotency key (a double-click/network-retry returns the
+existing row rather than inserting a second one), and every "mark paid/approve/close" action
+(`ExpenseService::markPaid()`, `RefundService::approve()`, `PayrollService::pay()`, `ShiftService::close()`,
+`CashDisbursementService::disburse()`) re-checks its own status guard *inside* the same transaction, under
+a row lock (`lockForUpdate()`), so two near-simultaneous requests for the same action can't both post — the
+second sees the now-changed status and fails cleanly instead.
+
+**The one real gap found and fixed**: `CashDisbursement.department_id` (and `Expense.department_id`) are
+optional on their forms — and it's specifically that department that lets `PaymentLedgerService` attribute
+a payment to that department's currently *open shift*, which is what lets a shift's own expected-cash
+figure include cash paid out mid-shift. Left blank, a disbursement/expense's eventual payment is still
+correctly posted to the ledger and to the right financial account (no money is lost or double-counted) —
+it just doesn't get folded into any specific shift's own cash reconciliation. Both forms
+(`finance/expenses/index.blade.php`, `finance/cash-disbursements/index.blade.php`) now pre-select the
+acting user's own department (still changeable, e.g. an accountant paying on another department's behalf)
+so this linkage happens by default. This is a UI default, not a ledger/schema change — no migration.
+
+**A second real gap, closed as part of §9.7**: before this round, nothing stopped the same `Expense` from
+being paid via `ExpenseController::pay()` (`ExpenseService::markPaid()`, its own ledger post) and *also*
+disbursed against separately — that would have been a genuine double record. Now that a disbursement can
+reference an expense (§9.7), `CashDisbursementService::disburse()` re-checks the expense is still
+`approved` under a row lock before touching it and marks it paid itself
+(`ExpenseService::markPaidViaDisbursement()`, no second ledger post) — so linking an expense to a
+disbursement and then also trying to pay it normally now fails cleanly (it's no longer `approved`), instead
+of silently paying it twice.
+
+**Left as-is, and why**: `Payslip`/`PayrollRun`/`Order`/`FolioTransaction` don't carry their own persisted
+`financial_account_id` — the account used is only recoverable via the `Payment` row's polymorphic
+`reference_type`/`reference_id`. This is a traceability convenience gap ("which account did we run payroll
+from in March, without querying payments"), not a double-recording risk, since — per the finding above —
+there is only ever one ledger entry per event either way. Adding a persisted column to four more tables for
+convenience alone was judged out of scope for this round given the number of other changes already in it;
+flagged here for a future round if it's wanted.
+
+### 9.10 Testing disclosure for this round
+
+As with every round in this engagement, this sandbox has no `vendor/` directory and no Packagist access, so
+only `php -l` syntax checks were possible — every PHP file touched or added this round passes `php -l`
+(swept project-wide, not just the files edited), and every Blade file touched passes a directive-balance
+check (`@foreach`/`@endforeach`, `@forelse`/`@endforelse`, `@can`/`@endcan`, `@canany`/`@endcanany`,
+`@if`/`@endif`). New/updated PHPUnit test cases were written for §9.8 (shift opening balance) only, since
+it's the one change with the highest financial-correctness stakes and the most existing test coverage to
+keep in sync; §9.1–9.7 and the department-prefill part of §9.9 have **no new automated test coverage** in
+this delivery — they should be exercised manually (or covered by a follow-up test-writing pass) before
+being relied on in production, exactly as this engagement has flagged for every round where execution
+wasn't possible.

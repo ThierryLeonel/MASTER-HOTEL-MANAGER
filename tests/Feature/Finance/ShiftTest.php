@@ -31,7 +31,7 @@ class ShiftTest extends TestCase
         $fo = Department::where('code', 'FO')->first();
         $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
 
-        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), [])->assertRedirect();
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0])->assertRedirect();
 
         $shift = Shift::first();
         $this->assertSame('open', $shift->status);
@@ -62,7 +62,7 @@ class ShiftTest extends TestCase
         $fo = Department::where('code', 'FO')->first();
         $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
 
-        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), []);
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0]);
         $shift = Shift::first();
 
         $this->actingAs($frontDesk)->post(route('payments.store'), [
@@ -78,14 +78,59 @@ class ShiftTest extends TestCase
         $this->assertSame('-1000.00', $shift->fresh()->variance);
     }
 
+    /**
+     * "When a shift is been open we should declare the opening balance" —
+     * the field is required at the HTTP layer, not just a service default.
+     */
+    public function test_opening_a_shift_requires_declaring_an_opening_cash_amount(): void
+    {
+        $fo = Department::where('code', 'FO')->first();
+        $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), [])
+            ->assertSessionHasErrors('opening_cash');
+
+        $this->assertSame(0, Shift::count());
+    }
+
+    /**
+     * "So that the system can properly calculate the expected closing and
+     * to know the variance at the end" — a non-zero opening float must
+     * carry through into expectedCashFor()/close(), not just be stored for
+     * display.
+     */
+    public function test_opening_cash_is_included_in_the_shifts_expected_closing_balance(): void
+    {
+        $fo = Department::where('code', 'FO')->first();
+        $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 5000])->assertRedirect();
+        $shift = Shift::first();
+        $this->assertSame('5000.00', $shift->opening_cash);
+
+        $this->actingAs($frontDesk)->post(route('payments.store'), [
+            'amount' => 15000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Visitor rent payment',
+        ])->assertRedirect();
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.close', $shift), [
+            'declared_cash' => 20000,
+        ])->assertRedirect();
+
+        $shift->refresh();
+        $this->assertSame('20000.00', $shift->expected_cash);
+        $this->assertSame('0.00', $shift->variance);
+    }
+
     public function test_a_department_cannot_have_two_open_shifts_at_once(): void
     {
         $fo = Department::where('code', 'FO')->first();
         $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
 
-        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), [])->assertRedirect();
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0])->assertRedirect();
 
-        $response = $this->actingAs($frontDesk)->post(route('finance.shifts.store'), []);
+        $response = $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0]);
 
         $response->assertSessionHasErrors('error');
         $this->assertSame(1, Shift::where('department_id', $fo->id)->where('status', 'open')->count());
@@ -109,6 +154,7 @@ class ShiftTest extends TestCase
         // logged-in user only.
         $this->actingAs($barStaff)->post(route('finance.shifts.store'), [
             'department_id' => $restaurant->id,
+            'opening_cash' => 0,
         ])->assertRedirect();
 
         $shift = Shift::first();
@@ -120,7 +166,7 @@ class ShiftTest extends TestCase
     {
         $userWithNoDepartment = $this->userWithRole('cashier', ['department_id' => null]);
 
-        $response = $this->actingAs($userWithNoDepartment)->post(route('finance.shifts.store'), []);
+        $response = $this->actingAs($userWithNoDepartment)->post(route('finance.shifts.store'), ['opening_cash' => 0]);
 
         $response->assertSessionHasErrors('error');
         $this->assertSame(0, Shift::count());

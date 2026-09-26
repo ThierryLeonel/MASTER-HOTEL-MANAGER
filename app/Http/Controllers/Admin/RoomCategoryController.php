@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\HmsException;
 use App\Http\Controllers\Controller;
+use App\Models\DiscountApproval;
+use App\Models\Reservation;
 use App\Models\RoomCategory;
 use App\Services\AuditLogger;
 use Illuminate\Http\Request;
@@ -85,5 +88,33 @@ class RoomCategoryController extends Controller
         $this->audit->log('admin.room_category_deactivated', 'admin', $roomCategory, actor: $request->user());
 
         return back()->with('status', 'Room category deactivated (existing rooms are unaffected).');
+    }
+
+    /**
+     * Broader request ("make sure the owner/main user has the access to
+     * edit, delete and update all categories and every input, except
+     * financial inputs"): RoomCategory could already be edited/deactivated
+     * but never actually removed. Same "only when genuinely unused"
+     * guard as RoomController::destroy() — a category still assigned to
+     * any room, or referenced by any reservation or discount-approval
+     * record (even for a room since deleted), is deactivated instead so
+     * that history keeps reading a real category name rather than a
+     * dangling reference.
+     */
+    public function destroy(Request $request, RoomCategory $roomCategory)
+    {
+        if ($roomCategory->rooms()->exists()) {
+            throw new HmsException("Category \"{$roomCategory->name}\" still has rooms assigned to it — reassign or remove those rooms first, or deactivate the category instead.");
+        }
+
+        if (Reservation::where('room_category_id', $roomCategory->id)->exists() || DiscountApproval::where('room_category_id', $roomCategory->id)->exists()) {
+            throw new HmsException("Category \"{$roomCategory->name}\" has reservation or discount history and can't be deleted without erasing that record. Deactivate it instead.");
+        }
+
+        $name = $roomCategory->name;
+        $this->audit->log('admin.room_category_deleted', 'admin', $roomCategory, oldValues: $roomCategory->toArray(), actor: $request->user());
+        $roomCategory->delete();
+
+        return back()->with('status', "Room category \"{$name}\" deleted.");
     }
 }

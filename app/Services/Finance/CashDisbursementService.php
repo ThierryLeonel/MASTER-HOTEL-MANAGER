@@ -5,6 +5,7 @@ namespace App\Services\Finance;
 use App\Exceptions\HmsException;
 use App\Models\CashDisbursement;
 use App\Models\DisbursementTicket;
+use App\Models\Expense;
 use App\Models\FinancialAccount;
 use App\Models\User;
 use App\Services\AuditLogger;
@@ -40,6 +41,7 @@ class CashDisbursementService
     public function __construct(
         private readonly AuditLogger $audit,
         private readonly PaymentLedgerService $ledger,
+        private readonly ExpenseService $expenses,
     ) {
     }
 
@@ -83,6 +85,7 @@ class CashDisbursementService
      *   amount: float,
      *   paid_to: string,
      *   purpose: string,
+     *   expense_id?: int|null,
      *   financial_account_id: int,
      *   department_id?: int|null,
      *   authorized_by_user_id?: int|null,
@@ -111,6 +114,29 @@ class CashDisbursementService
         return DB::transaction(function () use ($data, $amount, $actor, $financialAccount) {
             $ticket = null;
             $departmentId = $data['department_id'] ?? null;
+
+            // "Reference ... the expense ... done": locked and re-verified
+            // here, inside the same transaction as the ledger post below,
+            // so a concurrent second disbursement (or a concurrent
+            // ExpenseController::pay()) against the same expense can't
+            // both succeed — the loser sees isApproved() already false and
+            // fails cleanly, exactly like markPaid()'s own concurrency
+            // guard.
+            $expense = null;
+            if (! empty($data['expense_id'])) {
+                /** @var Expense $expense */
+                $expense = Expense::query()->whereKey($data['expense_id'])->lockForUpdate()->firstOrFail();
+
+                if (! $expense->isApproved()) {
+                    throw new HmsException("Only an approved expense can be disbursed against (current status: {$expense->status}).");
+                }
+
+                if (abs((float) $expense->amount - $amount) > 0.005) {
+                    throw new HmsException("This disbursement ({$amount}) does not match the expense's approved amount ({$expense->amount}) — they must be equal so the ledger and the expense agree on what was paid.");
+                }
+
+                $departmentId ??= $expense->department_id;
+            }
 
             if (! empty($data['ticket_id'])) {
                 /** @var DisbursementTicket $ticket */
@@ -145,6 +171,7 @@ class CashDisbursementService
                 'amount' => $amount,
                 'paid_to' => $data['paid_to'],
                 'purpose' => $data['purpose'],
+                'expense_id' => $expense?->id,
                 // Fourth post-9.8 fix round: $financialAccount->type is
                 // 'bank' for the Bank account, but the `method` column's
                 // enum doesn't contain 'bank' — only 'bank_transfer'.
@@ -173,6 +200,14 @@ class CashDisbursementService
             );
 
             $ticket?->update(['status' => 'used']);
+
+            // The ledger post above IS this expense's payment — never call
+            // ExpenseService::markPaid() here, since that would post a
+            // second, duplicate Payment for the same money out. See
+            // ExpenseService::markPaidViaDisbursement()'s docblock.
+            if ($expense) {
+                $this->expenses->markPaidViaDisbursement($expense, $actor, $financialAccount);
+            }
 
             $this->audit->log('finance.cash_disbursed', 'finance', $disbursement, null, $disbursement->fresh()->toArray(), actor: $actor);
 

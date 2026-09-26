@@ -439,7 +439,10 @@ class RealDatabaseConcurrencyTest extends TestCase
     private function openRealShift(string $departmentCode, User $actor): void
     {
         $department = \App\Models\Department::where('code', $departmentCode)->firstOrFail();
-        app(\App\Services\Finance\ShiftService::class)->open($department, $actor);
+        // Opening cash is now a required declared float — see
+        // ShiftService::open()'s docblock; 0 here since this test is about
+        // concurrent posting, not reconciling a real starting drawer.
+        app(\App\Services\Finance\ShiftService::class)->open($department, $actor, 0.0);
     }
 
     private function track(mixed $model): mixed

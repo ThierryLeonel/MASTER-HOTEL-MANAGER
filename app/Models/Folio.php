@@ -11,7 +11,7 @@ class Folio extends Model
     use HasSyncUlid;
     use HasFactory;
 
-    protected $fillable = ['stay_id', 'status', 'balance', 'closed_at', 'closed_by'];
+    protected $fillable = ['stay_id', 'invoice_number', 'status', 'balance', 'closed_at', 'closed_by'];
 
     protected function casts(): array
     {

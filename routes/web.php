@@ -118,7 +118,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/search', [GuestController::class, 'search'])->name('search');
         Route::get('/create', [GuestController::class, 'create'])->name('create');
         Route::post('/', [GuestController::class, 'store'])->name('store');
+        // Broader "edit/delete every category and input" request — Guest
+        // already uses SoftDeletes, so "delete" here is reversible; see
+        // GuestController::update()/destroy()/restore() docblocks.
+        Route::post('/{guest}/restore', [GuestController::class, 'restore'])->name('restore');
         Route::get('/{guest}', [GuestController::class, 'show'])->name('show');
+        Route::put('/{guest}', [GuestController::class, 'update'])->name('update');
+        Route::delete('/{guest}', [GuestController::class, 'destroy'])->name('destroy');
     });
 
     // Rooms
@@ -150,6 +156,10 @@ Route::middleware('auth')->group(function () {
     Route::middleware('permission:manage-guests')->prefix('companies')->name('companies.')->group(function () {
         Route::get('/', [CompanyController::class, 'index'])->name('index');
         Route::post('/', [CompanyController::class, 'store'])->name('store');
+        // Broader "edit/delete every category and input" request — see
+        // CompanyController::update()/destroy() docblocks.
+        Route::put('/{company}', [CompanyController::class, 'update'])->name('update');
+        Route::delete('/{company}', [CompanyController::class, 'destroy'])->name('destroy');
     });
 
     // Reservations
@@ -272,8 +282,14 @@ Route::middleware('auth')->group(function () {
     Route::middleware('permission:manage-facilities')->prefix('facilities')->name('facilities.')->group(function () {
         Route::get('/', [FacilityController::class, 'index'])->name('index');
         Route::post('/', [FacilityController::class, 'store'])->name('store');
+        // Broader "edit/delete every category and input" request — see
+        // FacilityController::update()/destroy()/updateRate()/destroyRate().
+        Route::put('/{facility}', [FacilityController::class, 'update'])->name('update');
+        Route::delete('/{facility}', [FacilityController::class, 'destroy'])->name('destroy');
         Route::post('/{facility}/rates', [FacilityController::class, 'storeRate'])->name('rates.store');
+        Route::put('/rates/{rate}', [FacilityController::class, 'updateRate'])->name('rates.update');
         Route::post('/rates/{rate}/toggle', [FacilityController::class, 'toggleRate'])->name('rates.toggle');
+        Route::delete('/rates/{rate}', [FacilityController::class, 'destroyRate'])->name('rates.destroy');
     });
     Route::middleware('permission:grant-facility-access')->prefix('facility-access')->name('facility-access.')->group(function () {
         Route::get('/', [FacilityAccessController::class, 'index'])->name('index');
@@ -366,7 +382,14 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:manage-menu')->prefix('menu')->name('menu.')->group(function () {
             Route::get('/', [MenuController::class, 'index'])->name('index');
             Route::post('/categories', [MenuController::class, 'storeCategory'])->name('categories.store');
+            // Broader "edit/delete every category and input" request —
+            // see MenuController::updateCategory()/destroyCategory() and
+            // ::updateItem()/destroyItem() docblocks.
+            Route::put('/categories/{category}', [MenuController::class, 'updateCategory'])->name('categories.update');
+            Route::delete('/categories/{category}', [MenuController::class, 'destroyCategory'])->name('categories.destroy');
             Route::post('/items', [MenuController::class, 'storeItem'])->name('items.store');
+            Route::put('/items/{item}', [MenuController::class, 'updateItem'])->name('items.update');
+            Route::delete('/items/{item}', [MenuController::class, 'destroyItem'])->name('items.destroy');
             Route::get('/items/{item}/recipe', [MenuController::class, 'recipe'])->name('items.recipe');
             Route::post('/items/{item}/recipe', [MenuController::class, 'storeRecipeItem'])->name('items.recipe.store');
             Route::post('/items/{item}/recipe/{recipeItem}/remove', [MenuController::class, 'removeRecipeItem'])->name('items.recipe.remove');
@@ -386,6 +409,15 @@ Route::middleware('auth')->group(function () {
     Route::prefix('breakfast')->name('breakfast.')->group(function () {
         Route::get('/', [BreakfastController::class, 'index'])->middleware('permission:operate-restaurant-pos')->name('index');
         Route::post('/stays/{stay}/redeem', [BreakfastController::class, 'redeem'])->middleware('permission:operate-restaurant-pos')->name('redeem');
+        // "Edit ... complimentary breakfast" / "delete ... complimentary
+        // breakfast": both manager-level corrections to an already-served
+        // redemption, so they share 'reverse-breakfast-entitlement' rather
+        // than the front-line 'operate-restaurant-pos' that only covers
+        // creating one. destroy() is a real "Delete" button in the UI, but
+        // — like every other historical record in this app — it never
+        // actually erases the row; see BreakfastController::destroy().
+        Route::put('/entitlements/{entitlement}', [BreakfastController::class, 'update'])->middleware('permission:reverse-breakfast-entitlement')->name('update');
+        Route::delete('/entitlements/{entitlement}', [BreakfastController::class, 'destroy'])->middleware('permission:reverse-breakfast-entitlement')->name('destroy');
         Route::post('/entitlements/{entitlement}/reverse', [BreakfastController::class, 'reverse'])->middleware('permission:reverse-breakfast-entitlement')->name('reverse');
     });
 
@@ -399,12 +431,20 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:manage-products')->group(function () {
             Route::get('/products', [ProductController::class, 'index'])->name('products.index');
             Route::post('/products', [ProductController::class, 'store'])->name('products.store');
+            // Broader "edit/delete every category and input" request —
+            // see ProductController::update()/destroy() docblocks.
+            Route::put('/products/{product}', [ProductController::class, 'update'])->name('products.update');
+            Route::delete('/products/{product}', [ProductController::class, 'destroy'])->name('products.destroy');
             Route::post('/units', [ProductController::class, 'storeUnit'])->name('units.store');
+            Route::put('/units/{unit}', [ProductController::class, 'updateUnit'])->name('units.update');
+            Route::delete('/units/{unit}', [ProductController::class, 'destroyUnit'])->name('units.destroy');
         });
 
         Route::middleware('permission:manage-suppliers')->group(function () {
             Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
             Route::post('/suppliers', [SupplierController::class, 'store'])->name('suppliers.store');
+            Route::put('/suppliers/{supplier}', [SupplierController::class, 'update'])->name('suppliers.update');
+            Route::delete('/suppliers/{supplier}', [SupplierController::class, 'destroy'])->name('suppliers.destroy');
         });
 
         Route::middleware('permission:manage-purchase-orders')->prefix('purchase-orders')->name('purchase-orders.')->group(function () {
@@ -564,6 +604,13 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:manage-own-shift|view-shift-reports')->group(function () {
             Route::get('/shifts', [ShiftController::class, 'index'])->name('shifts.index');
             Route::get('/shifts/{shift}/print', [ShiftController::class, 'print'])->name('shifts.print');
+            // "Let the expected balance per the shift be visibly changing
+            // as the day and transactions are moving" — polled by
+            // finance/shifts/index.blade.php while a shift is open.
+            // ShiftController::expected() re-checks department scoping
+            // itself (same as index()), since the OR-permission here alone
+            // would otherwise let one department's staff poll another's.
+            Route::get('/shifts/{shift}/expected', [ShiftController::class, 'expected'])->name('shifts.expected');
         });
 
         // Financial accounts (third post-9.8 fix round,
@@ -626,8 +673,13 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:clock-own-attendance|record-attendance')
             ->get('/attendance', [AttendanceController::class, 'index'])->name('attendance.index');
 
-        Route::middleware('permission:manage-employees')
-            ->post('/leave-types', [LeaveController::class, 'storeType'])->name('leave-types.store');
+        Route::middleware('permission:manage-employees')->prefix('leave-types')->name('leave-types.')->group(function () {
+            Route::post('/', [LeaveController::class, 'storeType'])->name('store');
+            // Broader "edit/delete every category and input" request —
+            // see LeaveController::updateType()/destroyType() docblocks.
+            Route::put('/{leaveType}', [LeaveController::class, 'updateType'])->name('update');
+            Route::delete('/{leaveType}', [LeaveController::class, 'destroyType'])->name('destroy');
+        });
 
         Route::middleware('permission:request-leave')->prefix('leave-requests')->name('leave-requests.')->group(function () {
             Route::post('/', [LeaveController::class, 'store'])->name('store');
@@ -643,7 +695,14 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:manage-employees')->prefix('payroll-deductions')->name('payroll-deductions.')->group(function () {
             Route::get('/', [PayrollController::class, 'deductionsIndex'])->name('index');
             Route::post('/', [PayrollController::class, 'storeDeductionType'])->name('store');
+            // Broader "edit/delete every category and input" request —
+            // see PayrollController::updateDeductionType()/
+            // destroyDeductionType()/updateBracket()/destroyBracket().
+            Route::put('/{payrollDeductionType}', [PayrollController::class, 'updateDeductionType'])->name('update');
+            Route::delete('/{payrollDeductionType}', [PayrollController::class, 'destroyDeductionType'])->name('destroy');
             Route::post('/{payrollDeductionType}/brackets', [PayrollController::class, 'storeBracket'])->name('brackets.store');
+            Route::put('/brackets/{bracket}', [PayrollController::class, 'updateBracket'])->name('brackets.update');
+            Route::delete('/brackets/{bracket}', [PayrollController::class, 'destroyBracket'])->name('brackets.destroy');
         });
 
         Route::middleware('permission:manage-payroll')->prefix('payroll-runs')->name('payroll-runs.')->group(function () {
@@ -701,6 +760,9 @@ Route::middleware('auth')->group(function () {
         Route::put('/{department}', [DepartmentController::class, 'update'])->name('update');
         Route::post('/{department}/activate', [DepartmentController::class, 'activate'])->name('activate');
         Route::post('/{department}/deactivate', [DepartmentController::class, 'deactivate'])->name('deactivate');
+        // Broader "edit/delete every category" request — see
+        // DepartmentService::delete()'s docblock for the history guard.
+        Route::delete('/{department}', [DepartmentController::class, 'destroy'])->name('destroy');
     });
 
     // Seventh post-9.8 fix round, follow-up (PHASE9_AUDIT_AND_PLAN.md
@@ -732,6 +794,9 @@ Route::middleware('auth')->group(function () {
         Route::put('/{roomCategory}', [RoomCategoryController::class, 'update'])->name('update');
         Route::post('/{roomCategory}/activate', [RoomCategoryController::class, 'activate'])->name('activate');
         Route::post('/{roomCategory}/deactivate', [RoomCategoryController::class, 'deactivate'])->name('deactivate');
+        // Broader "edit/delete every category" request — see
+        // RoomCategoryController::destroy()'s docblock for the history guard.
+        Route::delete('/{roomCategory}', [RoomCategoryController::class, 'destroy'])->name('destroy');
     });
 
     // Phase 9.7.6: the sync engine's human-facing dashboard — device
@@ -809,6 +874,12 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:view-inventory-reports')->group(function () {
             Route::get('/inventory', [ReportController::class, 'inventory'])->name('inventory');
             Route::get('/inventory/print', [ReportController::class, 'inventoryPrint'])->name('inventory.print');
+            // "Purchase reports should be generated from purchase order and
+            // goods received" — same permission as the rest of inventory
+            // reporting, since it reads the same procurement ledgers.
+            Route::get('/purchases', [ReportController::class, 'purchases'])->name('purchases');
+            Route::get('/purchases/print', [ReportController::class, 'purchasesPrint'])->name('purchases.print');
+            Route::get('/purchases/csv', [ReportController::class, 'purchasesCsv'])->name('purchases.csv');
         });
 
         Route::middleware('permission:view-hr-reports')->group(function () {

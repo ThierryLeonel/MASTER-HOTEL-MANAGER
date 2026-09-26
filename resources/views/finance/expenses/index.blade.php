@@ -70,10 +70,18 @@
             <form method="POST" action="{{ route('finance.expenses.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                 @csrf
                 <div class="text-xs font-medium">Request an expense</div>
+                {{--
+                    "Correct the financial linking ... so we do not have
+                    double records": the department set here is what later
+                    lets this expense's eventual payment (ExpenseService::
+                    markPaid()) attribute to that department's open shift,
+                    same reasoning as the disbursement form. Pre-selected to
+                    the requester's own department but still changeable.
+                --}}
                 <select name="department_id" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
-                    <option value="">Department (optional)…</option>
+                    <option value="">No specific department…</option>
                     @foreach ($departments as $department)
-                        <option value="{{ $department->id }}">{{ $department->name }}</option>
+                        <option value="{{ $department->id }}" @selected(auth()->user()->department_id === $department->id)>{{ $department->name }}</option>
                     @endforeach
                 </select>
                 <input name="category" placeholder="Category (e.g. Utilities, Supplies)" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">

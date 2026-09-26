@@ -42,9 +42,20 @@ class ShiftService
     {
     }
 
-    public function open(Department $department, User $actor, ?string $notes = null): Shift
+    /**
+     * "When a shift is been open we should declare the opening balance, so
+     * that the system can properly calculate the expected closing and to
+     * know the variance at the end": `$openingCash` is the till's starting
+     * float, counted by whoever is opening the shift — see
+     * expectedCashFor() for how it folds into the expected-closing figure.
+     */
+    public function open(Department $department, User $actor, float $openingCash, ?string $notes = null): Shift
     {
-        return DB::transaction(function () use ($department, $actor, $notes) {
+        return DB::transaction(function () use ($department, $actor, $openingCash, $notes) {
+            if ($openingCash < 0) {
+                throw new HmsException('Opening cash cannot be negative.');
+            }
+
             $existing = Shift::where('department_id', $department->id)->where('status', 'open')->lockForUpdate()->first();
 
             if ($existing) {
@@ -56,6 +67,7 @@ class ShiftService
                 'department_id' => $department->id,
                 'opened_by' => $actor->id,
                 'opened_at' => now(),
+                'opening_cash' => $openingCash,
                 'status' => 'open',
                 'notes' => $notes,
             ]);
@@ -80,6 +92,15 @@ class ShiftService
      * payment itself was actually recorded at. `shift_id` is a fact
      * decided once, at the moment the payment was created, never
      * re-derived.
+     *
+     * "Let the expected balance per the shift be visibly changing as the
+     * day and transactions are moving": starts from the declared
+     * `opening_cash` float (0 for a shift opened before that column
+     * existed — see the migration's docblock) and adds/subtracts every
+     * cash payment posted against this shift so far, so calling this
+     * mid-shift always reflects transactions up to that exact moment —
+     * see ShiftController::expected() for the polled JSON endpoint that
+     * exposes this live.
      */
     public function expectedCashFor(Shift $shift): float
     {
@@ -88,7 +109,7 @@ class ShiftService
         $out = (float) Payment::where('method', 'cash')->where('direction', 'out')
             ->where('shift_id', $shift->id)->sum('amount');
 
-        return round($in - $out, 2);
+        return round((float) ($shift->opening_cash ?? 0) + $in - $out, 2);
     }
 
     /**

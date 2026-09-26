@@ -13,6 +13,7 @@ use App\Services\AuditLogger;
 use App\Services\Finance\ShiftGateService;
 use App\Services\FrontOffice\DiscountApprovalService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Check-in creates a Stay + an open Folio, and flips the room to
@@ -245,9 +246,26 @@ class CheckInService
     {
         return Folio::create([
             'stay_id' => $stay->id,
+            'invoice_number' => $this->generateInvoiceNumber(),
             'status' => 'open',
             'balance' => 0,
         ]);
+    }
+
+    /**
+     * "Invoice numberings ... should be automatically generated" — assigned
+     * once, here, at the moment the folio opens, so it stays fixed for the
+     * whole stay no matter how many charges/payments post to it later.
+     * Same `PREFIX-Ymd-random` shape as every other auto-numbered document
+     * in the system (order/PO/requisition/etc numbers).
+     */
+    private function generateInvoiceNumber(): string
+    {
+        do {
+            $number = 'INV-'.now()->format('Ymd').'-'.strtoupper(Str::random(5));
+        } while (Folio::where('invoice_number', $number)->exists());
+
+        return $number;
     }
 
     /**

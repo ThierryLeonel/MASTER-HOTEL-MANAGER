@@ -41,7 +41,11 @@ trait CreatesUsers
         $actor = User::factory()->create();
         $actor->assignRole('owner');
 
-        return app(\App\Services\Finance\ShiftService::class)->open($department, $actor);
+        // Opening cash is now a required declared float (see
+        // ShiftService::open()'s docblock) — 0 here since these tests are
+        // about the transactions posted during the shift, not reconciling
+        // a real starting drawer amount.
+        return app(\App\Services\Finance\ShiftService::class)->open($department, $actor, 0.0);
     }
 
     /**

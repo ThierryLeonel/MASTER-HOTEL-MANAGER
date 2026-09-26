@@ -28,6 +28,11 @@
         </div>
         <div class="text-right">
             <div class="text-xs font-semibold uppercase tracking-wide">{{ $documentTitle }}</div>
+            {{-- Folios opened before invoice numbering existed have no
+                 invoice_number and never had one assigned at the time —
+                 falls back to a folio-id-based label rather than inventing
+                 a number retroactively. --}}
+            <div class="text-[10px] text-slate-500">No. {{ $stay->folio->invoice_number ?? ('FOLIO-'.$stay->folio->id) }}</div>
             <div class="text-[10px] text-slate-500">{{ now()->format('d M Y H:i') }}</div>
         </div>
     </div>

@@ -85,6 +85,37 @@
                 <label class="flex items-center gap-2 text-xs"><input type="checkbox" name="requires_approval" value="1" checked> Requires approval</label>
                 <button class="w-full rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">Save</button>
             </form>
+
+            <div class="rounded-lg bg-white p-4 shadow-sm">
+                <div class="text-xs font-medium mb-2">Leave types</div>
+                <ul class="space-y-2 text-xs">
+                    @foreach ($allLeaveTypes as $type)
+                        <li class="border-b border-slate-100 pb-2 last:border-0">
+                            <div class="flex items-center justify-between">
+                                <span>{{ $type->name }} ({{ $type->code }})</span>
+                                <details class="inline-block">
+                                    <summary class="cursor-pointer text-slate-600 underline">Edit</summary>
+                                    <form method="POST" action="{{ route('hr.leave-types.update', $type) }}" class="mt-2 space-y-1">
+                                        @csrf @method('PUT')
+                                        <input name="name" value="{{ $type->name }}" required class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                                        <input name="code" value="{{ $type->code }}" required class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                                        <input type="number" min="0" name="max_days_per_year" value="{{ $type->max_days_per_year }}" required class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                                        <label class="flex items-center gap-1"><input type="checkbox" name="is_paid" value="1" @checked($type->is_paid)> Paid</label>
+                                        <label class="flex items-center gap-1"><input type="checkbox" name="requires_approval" value="1" @checked($type->requires_approval)> Requires approval</label>
+                                        <label class="flex items-center gap-1"><input type="checkbox" name="is_active" value="1" @checked($type->is_active)> Active</label>
+                                        <button class="w-full rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700">Save</button>
+                                    </form>
+                                    <form method="POST" action="{{ route('hr.leave-types.destroy', $type) }}" class="mt-1"
+                                          onsubmit="return confirm(@js('Delete leave type '.$type->name.' permanently? Only a type with no request/balance history can be deleted — otherwise deactivate it instead.'));">
+                                        @csrf @method('DELETE')
+                                        <button class="text-red-700 hover:underline">Delete</button>
+                                    </form>
+                                </details>
+                            </div>
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
         @endcan
     </div>
 </div>

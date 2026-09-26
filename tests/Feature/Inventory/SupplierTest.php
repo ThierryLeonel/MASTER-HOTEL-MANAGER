@@ -61,4 +61,48 @@ class SupplierTest extends TestCase
         $response->assertForbidden();
         $this->assertDatabaseMissing('suppliers', ['name' => 'Should Not Be Created']);
     }
+
+    /**
+     * Broader request ("...edit, delete and update all categories and
+     * every input, except financial inputs").
+     */
+    public function test_accountant_can_update_a_supplier(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $supplier = Supplier::factory()->create(['name' => 'Old Name']);
+
+        $this->actingAs($accountant)->put(route('inventory.suppliers.update', $supplier), [
+            'name' => 'New Name',
+            'is_active' => '0',
+        ])->assertRedirect();
+
+        $supplier->refresh();
+        $this->assertSame('New Name', $supplier->name);
+        $this->assertFalse($supplier->is_active);
+    }
+
+    public function test_a_supplier_with_purchase_order_history_cannot_be_deleted(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $supplier = Supplier::factory()->create();
+        \App\Models\PurchaseOrder::create([
+            'po_number' => 'PO-SUP-1', 'supplier_id' => $supplier->id,
+            'status' => 'draft', 'ordered_by' => $accountant->id,
+        ]);
+
+        $response = $this->actingAs($accountant)->delete(route('inventory.suppliers.destroy', $supplier));
+
+        $response->assertSessionHasErrors('error');
+        $this->assertDatabaseHas('suppliers', ['id' => $supplier->id]);
+    }
+
+    public function test_an_unused_supplier_can_be_deleted(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $supplier = Supplier::factory()->create();
+
+        $this->actingAs($accountant)->delete(route('inventory.suppliers.destroy', $supplier))->assertRedirect();
+
+        $this->assertDatabaseMissing('suppliers', ['id' => $supplier->id]);
+    }
 }

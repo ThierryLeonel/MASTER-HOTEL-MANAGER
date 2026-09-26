@@ -245,4 +245,72 @@ class PayrollTest extends TestCase
         $response->assertSessionHasErrors('error');
         $this->assertDatabaseCount('payslips', 0);
     }
+
+    /**
+     * Broader request ("...edit, delete and update all categories and
+     * every input, except financial inputs"): the deduction TYPE/bracket
+     * are rate configuration, not a financial transaction — payslip_lines
+     * snapshots its own label+amount at generation time with no foreign
+     * key back to payroll_deduction_types (see that migration's docblock),
+     * so editing/deleting a type here can never rewrite an already-
+     * generated payslip.
+     */
+    public function test_owner_can_update_a_deduction_type(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $type = $this->flatDeduction(10);
+
+        $this->actingAs($owner)->put(route('hr.payroll-deductions.update', $type), [
+            'name' => 'Social Security (renamed)',
+            'code' => $type->code,
+            'calculation_method' => 'flat_percent',
+            'flat_rate_percent' => 12,
+            'is_active' => '1',
+        ])->assertRedirect();
+
+        $type->refresh();
+        $this->assertSame('Social Security (renamed)', $type->name);
+        $this->assertSame('12.00', $type->flat_rate_percent);
+    }
+
+    public function test_owner_can_delete_a_deduction_type_and_its_brackets(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $type = \App\Models\PayrollDeductionType::create([
+            'name' => 'Progressive Tax', 'code' => 'PROG', 'calculation_method' => 'progressive_brackets',
+            'is_active' => true, 'display_order' => 2,
+        ]);
+        $bracket = $type->brackets()->create(['min_amount' => 0, 'max_amount' => 100000, 'rate_percent' => 5]);
+
+        $this->actingAs($owner)->delete(route('hr.payroll-deductions.destroy', $type))->assertRedirect();
+
+        $this->assertDatabaseMissing('payroll_deduction_types', ['id' => $type->id]);
+        $this->assertDatabaseMissing('payroll_deduction_brackets', ['id' => $bracket->id]);
+    }
+
+    public function test_owner_can_update_a_bracket(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $type = \App\Models\PayrollDeductionType::create([
+            'name' => 'Progressive Tax', 'code' => 'PROG2', 'calculation_method' => 'progressive_brackets',
+            'is_active' => true, 'display_order' => 3,
+        ]);
+        $bracket = $type->brackets()->create(['min_amount' => 0, 'max_amount' => 100000, 'rate_percent' => 5]);
+
+        $this->actingAs($owner)->put(route('hr.payroll-deductions.brackets.update', $bracket), [
+            'min_amount' => 0, 'max_amount' => 150000, 'rate_percent' => 7,
+        ])->assertRedirect();
+
+        $this->assertSame('7.00', $bracket->fresh()->rate_percent);
+    }
+
+    public function test_a_role_without_manage_employees_cannot_edit_deduction_types(): void
+    {
+        $frontDesk = $this->userWithRole('front_desk');
+        $type = $this->flatDeduction();
+
+        $this->actingAs($frontDesk)->put(route('hr.payroll-deductions.update', $type), [
+            'name' => 'Hacked', 'code' => $type->code, 'calculation_method' => 'flat_percent', 'flat_rate_percent' => 1,
+        ])->assertForbidden();
+    }
 }

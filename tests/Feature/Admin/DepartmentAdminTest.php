@@ -69,6 +69,32 @@ class DepartmentAdminTest extends TestCase
         $this->assertTrue($department->fresh()->is_active);
     }
 
+    /**
+     * Broader request ("...edit, delete and update all categories and
+     * every input, except financial inputs").
+     */
+    public function test_owner_can_delete_a_department_that_was_never_used(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $department = Department::create(['name' => 'Unused', 'code' => 'UNUSED', 'is_active' => true]);
+
+        $this->actingAs($owner)->delete(route('admin.departments.destroy', $department))->assertRedirect();
+
+        $this->assertDatabaseMissing('departments', ['id' => $department->id]);
+    }
+
+    public function test_a_department_with_staff_assigned_cannot_be_deleted(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $department = Department::create(['name' => 'Housekeeping', 'code' => 'HK', 'is_active' => true]);
+        $this->userWithRole('front_desk', ['department_id' => $department->id]);
+
+        $response = $this->actingAs($owner)->delete(route('admin.departments.destroy', $department));
+
+        $response->assertSessionHasErrors('error');
+        $this->assertDatabaseHas('departments', ['id' => $department->id]);
+    }
+
     /** @dataProvider rolesWithoutManageDepartments */
     public function test_roles_without_manage_departments_permission_are_forbidden(string $role): void
     {

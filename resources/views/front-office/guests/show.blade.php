@@ -31,6 +31,41 @@
         @can('manage-reservations')
             <a href="{{ route('reservations.create') }}" class="inline-block mt-2 rounded bg-slate-800 px-3 py-1.5 text-white hover:bg-slate-700">New reservation</a>
         @endcan
+
+        @can('manage-guests')
+            <details class="mt-3 border-t border-slate-100 pt-3 text-xs">
+                <summary class="cursor-pointer text-slate-600 underline">Edit guest details</summary>
+                <form method="POST" action="{{ route('guests.update', $guest) }}" class="mt-2 space-y-1.5">
+                    @csrf @method('PUT')
+                    <label class="block text-[11px] text-slate-500">First name</label>
+                    <input name="first_name" value="{{ $guest->first_name }}" required class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <label class="block text-[11px] text-slate-500">Last name</label>
+                    <input name="last_name" value="{{ $guest->last_name }}" required class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <label class="block text-[11px] text-slate-500">Phone</label>
+                    <input name="phone" value="{{ $guest->phone }}" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <label class="block text-[11px] text-slate-500">Email</label>
+                    <input name="email" value="{{ $guest->email }}" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <label class="block text-[11px] text-slate-500">ID type</label>
+                    <input name="id_document_type" value="{{ $guest->id_document_type }}" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <label class="block text-[11px] text-slate-500">ID number</label>
+                    <input name="id_document_number" value="{{ $guest->id_document_number }}" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <label class="block text-[11px] text-slate-500">Nationality</label>
+                    <input name="nationality" value="{{ $guest->nationality }}" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <label class="block text-[11px] text-slate-500">Address</label>
+                    <textarea name="address" rows="2" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">{{ $guest->address }}</textarea>
+                    <label class="block text-[11px] text-slate-500">Notes</label>
+                    <textarea name="notes" rows="2" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">{{ $guest->notes }}</textarea>
+                    <label class="flex items-center gap-1"><input type="checkbox" name="is_blacklisted" value="1" @checked($guest->is_blacklisted)> Blacklisted</label>
+                    <input name="blacklist_reason" value="{{ $guest->blacklist_reason }}" placeholder="Blacklist reason" class="w-full rounded border border-slate-300 px-1.5 py-1 text-xs">
+                    <button class="w-full rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700">Save changes</button>
+                </form>
+                <form method="POST" action="{{ route('guests.destroy', $guest) }}" class="mt-1.5"
+                      onsubmit="return confirm(@js('Remove '.$guest->full_name.' from the active guest list? Their reservation/stay/payment history is kept, and this can be undone from Guests → Removed.'));">
+                    @csrf @method('DELETE')
+                    <button class="w-full rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50">Remove guest</button>
+                </form>
+            </details>
+        @endcan
     </div>
     <div class="col-span-1 space-y-6 md:col-span-2">
         <div>

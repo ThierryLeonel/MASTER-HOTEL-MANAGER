@@ -10,6 +10,7 @@ use App\Services\Reporting\HrReportService;
 use App\Services\Reporting\InventoryReportService;
 use App\Services\Reporting\KpiDashboardService;
 use App\Services\Reporting\OperationsReportService;
+use App\Services\Reporting\PurchaseReportService;
 use App\Services\Reporting\WeeklyOwnerSummaryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -26,6 +27,7 @@ class ReportController extends Controller
         private readonly KpiDashboardService $kpis,
         private readonly WeeklyOwnerSummaryService $weeklyOwnerSummary,
         private readonly DepartmentReconciliationReportService $departmentReconciliationService,
+        private readonly PurchaseReportService $purchases,
     ) {
     }
 
@@ -444,6 +446,49 @@ class ReportController extends Controller
         return $this->csvResponse(
             "department-reconciliation-{$start->toDateString()}-to-{$end->toDateString()}.csv",
             ['Department', 'Sales/income', 'Cash in', 'Cash out', 'Net cash', 'Non-cash in', 'Non-cash by account', 'Total collected', 'Shifts closed', 'Shift variance total'],
+            $rows
+        );
+    }
+
+    /**
+     * "Purchase reports should be generated from purchase order and goods
+     * received" — see PurchaseReportService's docblock for how the ordered
+     * vs. received figures are derived straight from those two ledgers.
+     */
+    public function purchases(Request $request)
+    {
+        [$start, $end] = $this->range($request);
+        $report = $this->purchases->forRange($start, $end);
+
+        return view('reports.purchases', array_merge($report, compact('start', 'end')));
+    }
+
+    public function purchasesPrint(Request $request)
+    {
+        [$start, $end] = $this->range($request);
+        $report = $this->purchases->forRange($start, $end);
+
+        return view('reports.purchases-print', array_merge($report, compact('start', 'end')));
+    }
+
+    public function purchasesCsv(Request $request)
+    {
+        [$start, $end] = $this->range($request);
+        $report = $this->purchases->forRange($start, $end);
+
+        $rows = $report['purchase_orders']->map(fn ($row) => [
+            $row['po']->po_number,
+            $row['po']->created_at->toDateString(),
+            $row['po']->supplier?->name,
+            $row['po']->status,
+            $row['ordered_value'],
+            $row['received_value'],
+            $row['outstanding_value'],
+        ]);
+
+        return $this->csvResponse(
+            "purchase-report-{$start->toDateString()}-to-{$end->toDateString()}.csv",
+            ['PO number', 'Date', 'Supplier', 'Status', 'Ordered value', 'Received value', 'Outstanding value'],
             $rows
         );
     }

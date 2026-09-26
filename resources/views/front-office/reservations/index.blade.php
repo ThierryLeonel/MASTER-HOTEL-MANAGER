@@ -31,7 +31,7 @@
     <a href="{{ route('reservations.create') }}" class="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">+ New Reservation</a>
 </div>
 
-<div class="overflow-hidden rounded-lg bg-white shadow-sm">
+<div class="overflow-x-auto rounded-lg bg-white shadow-sm">
     <table class="w-full text-sm">
         <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
             <tr><th class="p-3">Number</th><th class="p-3">Guest</th><th class="p-3">Dates</th><th class="p-3">Source</th><th class="p-3">Status</th><th class="p-3"></th></tr>

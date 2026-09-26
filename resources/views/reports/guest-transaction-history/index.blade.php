@@ -7,7 +7,7 @@
 </form>
 
 @if ($query)
-    <div class="overflow-hidden rounded-lg bg-white shadow-sm">
+    <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
         <table class="w-full text-sm">
             <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
                 <tr><th class="p-3">Guest</th><th class="p-3">Phone</th><th class="p-3">Email</th><th class="p-3"></th></tr>

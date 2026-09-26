@@ -50,6 +50,7 @@ class ShiftController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
+            'opening_cash' => 'required|numeric|min:0',
             'notes' => 'nullable|string|max:500',
         ]);
 
@@ -59,9 +60,28 @@ class ShiftController extends Controller
             throw new HmsException('Your account has no department assigned, so a shift cannot be opened automatically — ask an administrator to set your department first.');
         }
 
-        $this->service->open($department, $request->user(), $data['notes'] ?? null);
+        $this->service->open($department, $request->user(), (float) $data['opening_cash'], $data['notes'] ?? null);
 
         return back()->with('status', "Shift opened for {$department->name}.");
+    }
+
+    /**
+     * "Let the expected balance per the shift be visibly changing as the
+     * day and transactions are moving": a small polled JSON endpoint (see
+     * finance/shifts/index.blade.php's script) rather than a Livewire
+     * component, matching this app's existing plain-JS/CDN-only front end.
+     * Scoped the same way index() scopes the shift list itself — a
+     * department-scoped user can only poll their own department's shift.
+     */
+    public function expected(Request $request, Shift $shift)
+    {
+        $user = $request->user();
+
+        if (! $user->can('view-shift-reports') && (! $user->department || $shift->department_id !== $user->department->id)) {
+            abort(403);
+        }
+
+        return response()->json(['expected_cash' => $this->service->expectedCashFor($shift)]);
     }
 
     public function close(Request $request, Shift $shift)

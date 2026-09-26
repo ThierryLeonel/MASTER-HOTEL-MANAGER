@@ -1,7 +1,7 @@
 @extends('layouts.app')
 @section('title', 'Active Stays')
 @section('content')
-<div class="overflow-hidden rounded-lg bg-white shadow-sm">
+<div class="overflow-x-auto rounded-lg bg-white shadow-sm">
     <table class="w-full text-sm">
         <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
             <tr><th class="p-3">Room</th><th class="p-3">Guest</th><th class="p-3">Check-in</th><th class="p-3">Expected checkout</th><th class="p-3">Folio balance</th><th class="p-3"></th></tr>

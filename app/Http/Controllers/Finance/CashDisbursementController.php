@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CashDisbursement;
 use App\Models\Department;
 use App\Models\DisbursementTicket;
+use App\Models\Expense;
 use App\Models\FinancialAccount;
 use App\Models\User;
 use App\Services\Finance\CashDisbursementService;
@@ -21,14 +22,22 @@ class CashDisbursementController extends Controller
     {
         $tickets = DisbursementTicket::with(['department', 'authorizedBy'])
             ->orderByDesc('id')->limit(50)->get();
-        $disbursements = CashDisbursement::with(['ticket', 'department', 'authorizedByUser', 'recordedBy', 'financialAccount'])
+        $disbursements = CashDisbursement::with(['ticket', 'department', 'authorizedByUser', 'recordedBy', 'financialAccount', 'expense'])
             ->orderByDesc('id')->paginate(20);
         $departments = Department::where('is_active', true)->orderBy('name')->get();
         $openTickets = $tickets->where('status', 'open');
         $managers = User::role(['owner', 'general_manager', 'duty_manager'])->orderBy('name')->get();
         $financialAccounts = FinancialAccount::where('is_active', true)->orderBy('name')->get();
+        // "Reference ... the expense ... done": only an 'approved' expense
+        // can be picked — the moment one is disbursed against, it flips to
+        // 'paid' (see ExpenseService::markPaidViaDisbursement()) and drops
+        // out of this list on its own, so there's no separate "already
+        // linked" state to filter out. CashDisbursementService::disburse()
+        // re-checks this same status under a row lock at submission time,
+        // so this list being a moment stale is never a correctness issue.
+        $payableExpenses = Expense::where('status', 'approved')->orderByDesc('id')->get();
 
-        return view('finance.cash-disbursements.index', compact('tickets', 'disbursements', 'departments', 'openTickets', 'managers', 'financialAccounts'));
+        return view('finance.cash-disbursements.index', compact('tickets', 'disbursements', 'departments', 'openTickets', 'managers', 'financialAccounts', 'payableExpenses'));
     }
 
     public function storeTicket(Request $request)
@@ -69,6 +78,7 @@ class CashDisbursementController extends Controller
             'amount' => 'required|numeric|min:0.01',
             'paid_to' => 'required|string|max:150',
             'purpose' => 'required|string|max:1000',
+            'expense_id' => 'nullable|exists:expenses,id',
             'financial_account_id' => 'required|exists:financial_accounts,id',
             'department_id' => 'nullable|exists:departments,id',
             'authorized_by_user_id' => 'nullable|exists:users,id',
@@ -79,12 +89,12 @@ class CashDisbursementController extends Controller
 
         $this->service->disburse($data, $request->user());
 
-        return back()->with('status', 'Cash disbursement recorded and posted to the ledger.');
+        return back()->with('status', 'Finance disbursement recorded and posted to the ledger.');
     }
 
     public function print(CashDisbursement $cashDisbursement)
     {
-        $cashDisbursement->load(['ticket.authorizedBy', 'department', 'authorizedByUser', 'recordedBy']);
+        $cashDisbursement->load(['ticket.authorizedBy', 'department', 'authorizedByUser', 'recordedBy', 'financialAccount', 'expense']);
 
         return view('finance.cash-disbursements.print', ['disbursement' => $cashDisbursement]);
     }

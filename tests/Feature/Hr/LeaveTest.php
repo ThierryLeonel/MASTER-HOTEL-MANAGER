@@ -275,6 +275,56 @@ class LeaveTest extends TestCase
         $response->assertForbidden();
     }
 
+    /**
+     * Broader request ("...edit, delete and update all categories and
+     * every input, except financial inputs"): LeaveType had no edit/delete
+     * at all before this round.
+     */
+    public function test_owner_can_update_a_leave_type(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $type = $this->annualLeaveType();
+
+        $this->actingAs($owner)->put(route('hr.leave-types.update', $type), [
+            'name' => 'Annual Leave (renamed)',
+            'code' => $type->code,
+            'max_days_per_year' => 20,
+            'is_active' => '1',
+        ])->assertRedirect();
+
+        $type->refresh();
+        $this->assertSame('Annual Leave (renamed)', $type->name);
+        $this->assertSame(20, $type->max_days_per_year);
+    }
+
+    public function test_a_leave_type_with_request_history_cannot_be_deleted(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $type = $this->annualLeaveType();
+        $accountant = $this->userWithRole('accountant');
+        $this->actingAs($accountant)->post(route('hr.leave-requests.store'), [
+            'leave_type_id' => $type->id,
+            'start_date' => now()->addDays(5)->toDateString(),
+            'end_date' => now()->addDays(6)->toDateString(),
+            'reason' => 'History guard',
+        ]);
+
+        $response = $this->actingAs($owner)->delete(route('hr.leave-types.destroy', $type));
+
+        $response->assertSessionHasErrors('error');
+        $this->assertDatabaseHas('leave_types', ['id' => $type->id]);
+    }
+
+    public function test_an_unused_leave_type_can_be_deleted(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $type = $this->annualLeaveType();
+
+        $this->actingAs($owner)->delete(route('hr.leave-types.destroy', $type))->assertRedirect();
+
+        $this->assertDatabaseMissing('leave_types', ['id' => $type->id]);
+    }
+
     public function test_unpaid_leave_type_is_not_balance_tracked(): void
     {
         $unpaid = LeaveType::create([

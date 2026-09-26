@@ -45,9 +45,9 @@ class BreakfastEntitlementService
      * belt-and-braces pattern this correction round applies to
      * FolioTransaction reversals) rather than relied on alone.
      */
-    public function redeem(Stay $stay, MenuItem $menuItem, User $actor): BreakfastEntitlement
+    public function redeem(Stay $stay, MenuItem $menuItem, User $actor, bool $deliveredToRoom = false): BreakfastEntitlement
     {
-        return DB::transaction(function () use ($stay, $menuItem, $actor) {
+        return DB::transaction(function () use ($stay, $menuItem, $actor, $deliveredToRoom) {
             /** @var Stay $lockedStay */
             $lockedStay = Stay::query()->whereKey($stay->getKey())->lockForUpdate()->firstOrFail();
 
@@ -85,6 +85,7 @@ class BreakfastEntitlementService
                     'served_at' => now(),
                     'served_by' => $actor->id,
                     'menu_item_id' => $menuItem->id,
+                    'delivered_to_room' => $deliveredToRoom,
                 ]);
             } catch (QueryException $e) {
                 if (($e->errorInfo[0] ?? null) === '23000') {
@@ -97,6 +98,83 @@ class BreakfastEntitlementService
             $this->audit->log('restaurant.breakfast_redeemed', 'restaurant', $entitlement, null, $entitlement->toArray(), actor: $actor);
 
             return $entitlement;
+        });
+    }
+
+    /**
+     * "Edit ... complimentary breakfast": correcting the menu item served or
+     * the delivered-to-room flag on today's own redemption — e.g. staff
+     * picked the wrong item, or forgot to flag a room-service delivery.
+     * Restricted to the same business date and to a not-yet-reversed
+     * entitlement, matching every other "same-day only" correction guard in
+     * this codebase (e.g. Shift::close()) rather than letting an older
+     * day's already-reconciled record be rewritten. Changing the menu item
+     * reverses the old item's stock deduction and deducts the new item's,
+     * exactly like a reversal followed by a fresh redemption — so stock
+     * never silently drifts from what was actually served.
+     */
+    public function update(BreakfastEntitlement $entitlement, ?MenuItem $menuItem, bool $deliveredToRoom, User $actor): BreakfastEntitlement
+    {
+        return DB::transaction(function () use ($entitlement, $menuItem, $deliveredToRoom, $actor) {
+            /** @var BreakfastEntitlement $locked */
+            $locked = BreakfastEntitlement::query()->whereKey($entitlement->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->isReversed()) {
+                throw new HmsException('This breakfast entitlement has already been reversed and can no longer be edited.');
+            }
+
+            $businessDate = $this->accountingDay->today()->business_date;
+            if (! $locked->business_date->isSameDay($businessDate)) {
+                throw new HmsException("This entitlement was recorded for {$locked->business_date->toDateString()} — only today's redemptions can still be edited. Use Reverse instead.");
+            }
+
+            $oldValues = $locked->only(['menu_item_id', 'delivered_to_room']);
+            $oldMenuItem = $locked->menuItem;
+
+            if ($menuItem && $oldMenuItem && $menuItem->is($oldMenuItem)) {
+                $menuItem = null; // no change — skip the stock swap below entirely
+            }
+
+            if ($menuItem) {
+                if ($menuItem->outlet !== 'restaurant' || ! $menuItem->is_active) {
+                    throw new HmsException('Choose an active Restaurant menu item for the breakfast redemption.');
+                }
+
+                foreach ($oldMenuItem?->recipeItems ?? [] as $recipeItem) {
+                    $quantity = (float) $recipeItem->quantity_per_unit;
+                    $this->stock->receiveStock(
+                        product: $recipeItem->product,
+                        quantity: $quantity,
+                        unitCost: $this->stock->averageUnitCost($recipeItem->product),
+                        actor: $actor,
+                        sourceModule: 'restaurant_breakfast_edit',
+                        source: $locked,
+                        sourceReference: "Breakfast entitlement #{$locked->id} — item corrected",
+                        notes: "Reversing stock for {$oldMenuItem->name} before correcting the item served.",
+                    );
+                }
+
+                foreach ($menuItem->recipeItems as $recipeItem) {
+                    $this->stock->issueStock(
+                        product: $recipeItem->product,
+                        quantity: (float) $recipeItem->quantity_per_unit,
+                        actor: $actor,
+                        sourceModule: 'restaurant_breakfast_edit',
+                        type: 'issue',
+                        sourceReference: "Stay #{$locked->stay_id} complimentary breakfast (corrected)",
+                        notes: "Complimentary breakfast (corrected): {$menuItem->name}",
+                    );
+                }
+
+                $locked->menu_item_id = $menuItem->id;
+            }
+
+            $locked->delivered_to_room = $deliveredToRoom;
+            $locked->save();
+
+            $this->audit->log('restaurant.breakfast_entitlement_updated', 'restaurant', $locked, oldValues: $oldValues, newValues: $locked->only(['menu_item_id', 'delivered_to_room']), actor: $actor);
+
+            return $locked->fresh();
         });
     }
 

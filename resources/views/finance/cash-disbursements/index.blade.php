@@ -1,5 +1,5 @@
 @extends('layouts.app')
-@section('title', 'Cash Disbursements')
+@section('title', 'Finance Disbursements')
 @section('content')
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -11,6 +11,7 @@
                 <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
                     <tr>
                         <th class="p-3">Voucher #</th><th class="p-3">Department</th><th class="p-3">Paid to</th>
+                        <th class="p-3">Account</th><th class="p-3">Expense</th>
                         <th class="p-3 text-right">Amount</th><th class="p-3">Authorization</th><th class="p-3"></th>
                     </tr>
                 </thead>
@@ -20,12 +21,14 @@
                             <td class="p-3">{{ $disbursement->disbursement_number }}<div class="text-xs text-slate-500">{{ $disbursement->disbursed_at->format('d M Y H:i') }}</div></td>
                             <td class="p-3">{{ $disbursement->department->name ?? '—' }}</td>
                             <td class="p-3">{{ $disbursement->paid_to }}<div class="text-xs text-slate-500">{{ $disbursement->purpose }}</div></td>
+                            <td class="p-3">{{ $disbursement->financialAccount->name ?? '—' }}</td>
+                            <td class="p-3">{{ $disbursement->expense->expense_number ?? '—' }}</td>
                             <td class="p-3 text-right">{{ number_format($disbursement->amount, 0) }}</td>
                             <td class="p-3 text-xs">{{ $disbursement->authorizationLabel() }}</td>
                             <td class="p-3"><a href="{{ route('finance.cash-disbursements.print', $disbursement) }}" target="_blank" class="text-xs text-blue-700 hover:underline">Print</a></td>
                         </tr>
                     @empty
-                        <tr><td class="p-3 text-slate-500" colspan="6">No cash disbursements recorded yet.</td></tr>
+                        <tr><td class="p-3 text-slate-500" colspan="8">No finance disbursements recorded yet.</td></tr>
                     @endforelse
                 </tbody>
             </table>
@@ -88,7 +91,7 @@
         @can('record-cash-disbursement')
             <form method="POST" action="{{ route('finance.cash-disbursements.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                 @csrf
-                <div class="text-xs font-medium">Record a cash disbursement</div>
+                <div class="text-xs font-medium">Record a finance disbursement</div>
 
                 <label class="flex items-center gap-2 text-xs text-slate-600">
                     <input type="checkbox" onchange="document.getElementById('ticket-field').classList.toggle('hidden', !this.checked); document.getElementById('no-ticket-fields').classList.toggle('hidden', this.checked);">
@@ -117,14 +120,41 @@
                     <input name="authorized_by_title" placeholder="Their title (optional)" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
                 </div>
 
+                {{--
+                    "Correct the financial linking ... so we do not have
+                    double records": which department this money left from
+                    is what lets PaymentLedgerService attribute it to that
+                    department's currently open shift (if any), so the
+                    shift's own expected-cash figure includes cash paid out
+                    mid-shift, not just cash taken in. Pre-selecting the
+                    disburser's own department (still changeable, e.g. an
+                    accountant disbursing on another department's behalf)
+                    means this linkage happens by default instead of only
+                    when staff remember to pick one.
+                --}}
                 <select name="department_id" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
-                    <option value="">Department (optional)…</option>
+                    <option value="">No specific department (e.g. a head-office payment)…</option>
                     @foreach ($departments as $department)
-                        <option value="{{ $department->id }}">{{ $department->name }}</option>
+                        <option value="{{ $department->id }}" @selected(auth()->user()->department_id === $department->id)>{{ $department->name }}</option>
                     @endforeach
                 </select>
                 <input name="paid_to" placeholder="Paid to" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
                 <input name="purpose" placeholder="Purpose" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+                {{--
+                    "Reference ... the expense ... done": optional — pick
+                    the approved expense this disbursement is paying out.
+                    The amount below must then match that expense's amount
+                    exactly (enforced in CashDisbursementService::disburse())
+                    and the expense is marked paid automatically; it is
+                    NEVER also paid again from the Expenses screen for the
+                    same money — see ExpenseService::markPaidViaDisbursement().
+                --}}
+                <select name="expense_id" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+                    <option value="">Related expense (optional)…</option>
+                    @foreach ($payableExpenses as $expense)
+                        <option value="{{ $expense->id }}">{{ $expense->expense_number }} — {{ $expense->category }} ({{ number_format($expense->amount, 0) }})</option>
+                    @endforeach
+                </select>
                 <input type="number" step="0.01" min="0.01" name="amount" placeholder="Amount (XAF)" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
                 {{-- Post-9.8 third fix round: which specific account the money is
                      leaving from — PHASE9_AUDIT_AND_PLAN.md §21. --}}

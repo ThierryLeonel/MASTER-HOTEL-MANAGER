@@ -11,7 +11,7 @@
     @endif
 </div>
 
-<div class="overflow-hidden rounded-lg bg-white shadow-sm mb-6">
+<div class="overflow-x-auto rounded-lg bg-white shadow-sm mb-6">
     <table class="w-full text-sm">
         <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
             <tr>
@@ -54,7 +54,7 @@
     </table>
 </div>
 
-<div class="overflow-hidden rounded-lg bg-white shadow-sm">
+<div class="overflow-x-auto rounded-lg bg-white shadow-sm">
     <div class="border-b border-slate-100 p-3 text-xs font-semibold uppercase text-slate-500">Recent activity</div>
     <table class="w-full text-sm">
         <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">

@@ -8,7 +8,7 @@
     <a href="{{ route('reports.guest-stay-history.csv', ['start' => $start->toDateString(), 'end' => $end->toDateString()]) }}" class="rounded bg-slate-200 px-3 py-1.5 hover:bg-slate-300">Download CSV</a>
 </div>
 
-<div class="overflow-hidden rounded-lg bg-white shadow-sm">
+<div class="overflow-x-auto rounded-lg bg-white shadow-sm">
     <table class="w-full text-sm">
         <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
             <tr>

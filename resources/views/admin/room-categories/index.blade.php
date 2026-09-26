@@ -35,17 +35,25 @@
             </form>
             <div class="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
                 <span class="text-xs text-slate-500">{{ $category->is_active ? 'Active' : 'Deactivated' }}</span>
-                @if ($category->is_active)
-                    <form method="POST" action="{{ route('admin.room-categories.deactivate', $category) }}">
+                <div class="space-x-3">
+                    @if ($category->is_active)
+                        <form method="POST" action="{{ route('admin.room-categories.deactivate', $category) }}" class="inline">
+                            @csrf
+                            <button class="text-xs text-red-600 hover:underline">Deactivate</button>
+                        </form>
+                    @else
+                        <form method="POST" action="{{ route('admin.room-categories.activate', $category) }}" class="inline">
+                            @csrf
+                            <button class="text-xs text-green-600 hover:underline">Reactivate</button>
+                        </form>
+                    @endif
+                    <form method="POST" action="{{ route('admin.room-categories.destroy', $category) }}" class="inline"
+                          onsubmit="return confirm(@js('Delete category '.$category->name.' permanently? Only a category with no rooms or history can be deleted — otherwise deactivate it instead.'));">
                         @csrf
-                        <button class="text-xs text-red-600 hover:underline">Deactivate</button>
+                        @method('DELETE')
+                        <button class="text-xs text-red-700 hover:underline">Delete</button>
                     </form>
-                @else
-                    <form method="POST" action="{{ route('admin.room-categories.activate', $category) }}">
-                        @csrf
-                        <button class="text-xs text-green-600 hover:underline">Reactivate</button>
-                    </form>
-                @endif
+                </div>
             </div>
         </div>
     @endforeach

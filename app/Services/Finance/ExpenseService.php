@@ -185,6 +185,44 @@ class ExpenseService
         });
     }
 
+    /**
+     * "Cash disbursement ... [should reference] the reason, expense, or
+     * payment done": a Finance Disbursement can optionally pay a specific
+     * Expense directly, instead of going through markPaid() above. This
+     * method exists so that path never posts a SECOND ledger entry for the
+     * same money out — CashDisbursementService::disburse() already records
+     * the one and only Payment for it; this only updates the Expense's own
+     * status/attribution columns, exactly like markPaid() does, just
+     * without repeating its ledger()->record() call. Kept `internal` in
+     * name/visibility intent (public because it's called from another
+     * service, but never routed to from a controller) so a future reader
+     * doesn't mistake it for a second way to pay an expense from the UI.
+     *
+     * The caller is responsible for the row lock and the isApproved()
+     * re-check happening inside the SAME transaction as its own ledger
+     * post — see CashDisbursementService::disburse() — so this method
+     * itself re-checks once more as a second, cheap backstop rather than
+     * assuming the caller got it right.
+     */
+    public function markPaidViaDisbursement(Expense $expense, User $actor, FinancialAccount $financialAccount): Expense
+    {
+        if (! $expense->isApproved()) {
+            throw new HmsException("Only an approved expense can be paid (current status: {$expense->status}).");
+        }
+
+        $expense->update([
+            'status' => 'paid',
+            'paid_by' => $actor->id,
+            'paid_at' => now(),
+            'payment_method' => $financialAccount->paymentMethod(),
+            'financial_account_id' => $financialAccount->id,
+        ]);
+
+        $this->audit->log('finance.expense_paid_via_disbursement', 'finance', $expense, null, $expense->fresh()->toArray(), actor: $actor);
+
+        return $expense->fresh();
+    }
+
     private function generateNumber(): string
     {
         return 'EXP-'.now()->format('Ymd').'-'.strtoupper(Str::random(5));

@@ -60,18 +60,47 @@
         }
         @media (min-width: 768px) {
             #app-sidebar {
-                position: static;
+                position: sticky;
+                top: 0;
                 transform: none;
             }
             #sidebar-backdrop {
                 display: none !important;
             }
         }
+
+        /*
+            "Fix the scrolling sense, let it be dynamic per view and to all
+            different menus" — every module view extends this one layout, so
+            the fix belongs here rather than in each view. On desktop the
+            sidebar was `position: static` with no height constraint, which
+            made its own `overflow-y-auto` inert: the whole page (nav
+            included) scrolled as one unit, so the nav disappeared on any
+            page taller than the viewport. Now the shell itself is pinned to
+            the viewport height and only the two panes inside it — the nav
+            and the content area — scroll independently, each sized to
+            whatever that view actually contains (a short form has no
+            scrollbar; a long report scrolls its own content while the nav
+            stays put). Mobile keeps its existing off-canvas overlay
+            behaviour untouched; only the top bar is pinned so the hamburger
+            stays reachable while a long page scrolls beneath it.
+        */
+        @media (min-width: 768px) {
+            #app-shell {
+                height: 100vh;
+                overflow: hidden;
+            }
+            #app-sidebar,
+            #app-main {
+                height: 100vh;
+                overflow-y: auto;
+            }
+        }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
-    <div class="flex min-h-screen flex-col md:flex-row">
-        <header class="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-4 py-3 text-slate-100 md:hidden">
+    <div id="app-shell" class="flex min-h-screen flex-col md:flex-row">
+        <header class="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-slate-900 px-4 py-3 text-slate-100 md:hidden">
             <div class="flex items-center gap-2 font-semibold">
                 @if ($logoPath = app(\App\Services\SettingsService::class)->hotelLogoPath())
                     <img src="{{ \Illuminate\Support\Facades\Storage::disk('public')->url($logoPath) }}" alt="Logo" class="h-8 w-8 rounded bg-white object-contain p-0.5">
@@ -85,7 +114,7 @@
 
         <div id="sidebar-backdrop" onclick="document.getElementById('app-sidebar').classList.remove('sidebar-open'); this.classList.remove('sidebar-open');" class="fixed inset-0 z-30 bg-black/40 md:hidden"></div>
 
-        <aside id="app-sidebar" class="fixed inset-y-0 left-0 z-40 w-64 shrink-0 overflow-y-auto bg-slate-900 text-slate-200 flex flex-col md:static md:z-auto md:w-56">
+        <aside id="app-sidebar" class="fixed inset-y-0 left-0 z-40 w-64 shrink-0 overflow-y-auto bg-slate-900 text-slate-200 flex flex-col md:z-auto md:w-56">
             <div class="flex items-center justify-between gap-2 border-b border-slate-700 p-4">
                 <div class="flex min-w-0 items-center gap-2">
                     @if ($logoPath = app(\App\Services\SettingsService::class)->hotelLogoPath())
@@ -194,7 +223,7 @@
                     <a href="{{ route('finance.refunds.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.refunds.*') ? 'is-selected' : '' }}">Refunds</a>
                 @endcanany
                 @canany(['authorize-cash-disbursement', 'record-cash-disbursement'])
-                    <a href="{{ route('finance.cash-disbursements.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.cash-disbursements.*') ? 'is-selected' : '' }}">Cash Disbursements</a>
+                    <a href="{{ route('finance.cash-disbursements.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.cash-disbursements.*') ? 'is-selected' : '' }}">Finance Disbursements</a>
                 @endcanany
                 @canany(['manage-own-shift', 'view-shift-reports'])
                     <a href="{{ route('finance.shifts.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.shifts.*') ? 'is-selected' : '' }}">Shifts</a>
@@ -276,7 +305,7 @@
             </div>
         </aside>
 
-        <main class="min-w-0 flex-1 p-4 md:p-6">
+        <main id="app-main" class="min-w-0 flex-1 p-4 md:p-6">
             @if (session('status'))
                 <div class="mb-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">
                     {{ session('status') }}

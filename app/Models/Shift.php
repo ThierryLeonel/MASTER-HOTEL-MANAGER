@@ -10,7 +10,7 @@ class Shift extends Model
     use HasSyncUlid;
 
     protected $fillable = [
-        'shift_number', 'department_id', 'opened_by', 'opened_at',
+        'shift_number', 'department_id', 'opened_by', 'opened_at', 'opening_cash',
         'closed_by', 'closed_at', 'status', 'expected_cash',
         'declared_cash', 'variance', 'notes',
     ];
@@ -20,6 +20,7 @@ class Shift extends Model
         return [
             'opened_at' => 'datetime',
             'closed_at' => 'datetime',
+            'opening_cash' => 'decimal:2',
             'expected_cash' => 'decimal:2',
             'declared_cash' => 'decimal:2',
             'variance' => 'decimal:2',
