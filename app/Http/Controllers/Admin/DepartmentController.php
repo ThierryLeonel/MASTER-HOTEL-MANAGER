@@ -75,4 +75,12 @@ class DepartmentController extends Controller
 
         return back()->with('status', 'Department deactivated.');
     }
+
+    public function destroy(Request $request, Department $department)
+    {
+        $name = $department->name;
+        $this->service->delete($department, $request->user());
+
+        return redirect()->route('admin.departments.index')->with('status', "Department \"{$name}\" deleted.");
+    }
 }

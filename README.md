@@ -578,6 +578,20 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Owner can now edit/delete every category and non-financial master-data record — financial transactions untouched (`CORRECTION_ROUND_34_DELIVERY.md` §8.7)**
+- Direct request: "make sure the owner/main user has the access to edit, delete and update all categories
+  and every input, except financial inputs." Added edit and/or delete to every category and master-data
+  screen that was missing one: Room Category (delete only — edit already existed), Department (delete only),
+  Menu Category, Menu Item, Unit of Measure, Product, Supplier, Facility, Facility Rate, Leave Type (first
+  CRUD screen this table has ever had), and Payroll Deduction Type/Bracket. Guest and Company also gained
+  edit; Guest's "delete" is a reversible soft-delete (`guests.restore` undoes it) so every stay/reservation/
+  payment keeps working unchanged. No new permissions were added — each action reuses the same permission
+  that already gates that entity's own create action, and the Owner already bypasses every permission check
+  regardless. Every actual financial transaction (expenses, refunds, purchase orders, payments, payroll
+  runs, financial accounts) still only exposes its existing controlled workflow — none gained a raw edit or
+  delete. Deleting anything with real history is refused in favor of deactivating it, exactly like the Room
+  board already does. ~30 new/extended tests across 10 test files.
+
 **Owner can now edit and delete rooms (`CORRECTION_ROUND_34_DELIVERY.md` §8.6)**
 - New Owner-only `edit-room-details` permission: edit a room's number, category, floor, description, and
   active flag from the room board; delete a room only if it has never been used (otherwise deactivate it).

@@ -45,6 +45,12 @@
                                 <button class="text-green-600 hover:underline">Reactivate</button>
                             </form>
                         @endif
+                        <form method="POST" action="{{ route('admin.departments.destroy', $department) }}" class="inline"
+                              onsubmit="return confirm(@js('Delete department '.$department->name.' permanently? Only a department with no history at all can be deleted — otherwise deactivate it instead.'));">
+                            @csrf
+                            @method('DELETE')
+                            <button class="text-red-700 hover:underline">Delete</button>
+                        </form>
                     </td>
                 </tr>
             @endforeach

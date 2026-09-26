@@ -1078,3 +1078,77 @@ No migration (the `notes`/`is_active` columns already existed). Re-run
 passes every permission check regardless, so it works immediately either way). Tests:
 `tests/Feature/FrontOffice/RoomEditDeleteTest.php` (12 cases incl. forbidden for GM/Duty Manager/Accountant/
 Front Desk/Cashier).
+
+### 8.7 Owner: edit/delete extended to every category and master-data screen, financial records left alone
+
+Direct request: "make sure the owner/main user has the access to edit, delete and update all categories and
+every input, except financial inputs." §8.6 above only covered Rooms. Before doing anything, this round
+inventoried the whole app for two things: every "category"/reference-data table (RoomCategory, MenuCategory,
+Unit, LeaveType, PayrollDeductionType/Bracket, Department, Facility/FacilityRate), and every other
+non-financial master-data screen (Guest, Supplier, Product, Company, MenuItem, EmployeeProfile) — checking,
+for each one, whether an actual edit/delete **action** existed at all (a permission check is meaningless if
+there's no route/controller method behind it). Several had create-only screens that had never been touched
+since Phase 1–5; `LeaveType` had no admin screen whatsoever, only a seeder.
+
+**Design decision — why no pile of new permissions.** The Owner already bypasses every permission check
+unconditionally via `Gate::before` in `AppServiceProvider` (`return $user->hasRole('owner') ? true : null;`),
+which was already true before this round. So "make sure the Owner has access" doesn't require a new
+Owner-only permission for each of the dozen-plus entities below — it only requires the edit/delete action to
+*exist*, gated by whatever permission already governs that entity's own create action (`manage-settings` for
+RoomCategory, `manage-departments` for Department, `manage-menu` for the POS menu, `manage-products` for
+Product/Unit, `manage-suppliers` for Supplier, `manage-facilities` for Facility/FacilityRate, `manage-guests`
+for Guest/Company, `manage-employees` for LeaveType/PayrollDeductionType). This exactly mirrors how
+RoomCategory's and Department's own pre-existing `update()` actions already worked (never Owner-exclusive) —
+`edit-room-details` in §8.6 was the one deliberate exception, because the Owner asked for Rooms specifically
+against General Manager, who otherwise holds every operational permission. No such contrast was asked for
+here, so no new permission rows were added at all; the Owner gets everything below immediately, with zero
+reseeding required.
+
+**Design decision — what "except financial inputs" excludes.** Confirmed by inventory that every actual
+financial *transaction* record (`Expense`, `RefundRequest`, `PurchaseOrder`, `Payment`, cash disbursements,
+payroll runs/payslips, `FinancialAccount`) already only exposes a controlled workflow — submit/approve/
+reject/pay/void — never a raw edit or delete, and this round adds none. Two categories of "financial-adjacent"
+master data got extra scrutiny rather than a blanket pass:
+- **PayrollDeductionType/Bracket** are rate *configuration* (same category as RoomCategory's `base_rate`),
+  not a transaction — `payslip_lines` snapshots its own label+amount at generation time with **no foreign
+  key back to `payroll_deduction_types` at all** (confirmed by reading that migration), so editing or
+  deleting a deduction type can never rewrite an already-generated payslip. Treated as an ordinary category.
+- **EmployeeProfile** (`basic_salary`, `payment_method`, `bank_account`) was deliberately left untouched —
+  `EmployeeService::onboard()` already lets `manage-employees` holders update these via the existing "Add /
+  update employee profile" form (an upsert keyed on `user_id`, pre-dating this round), and this round neither
+  restricts nor further opens that path, since doing either was outside what was actually asked. `terminate()`
+  remains the only way to remove an employee record — no employee `destroy()` was added, consistent with
+  "except financial inputs" given payroll/attendance history hangs off this record.
+
+**What actually shipped** (every item follows the same "any real history → deactivate instead of delete"
+rule already established by Room/Department, checked against every foreign key that actually references the
+table — see each controller's own docblock for the exact list per entity):
+
+| Entity | Update | Delete guard |
+|---|---|---|
+| RoomCategory | already had it | blocked by rooms/reservations/discount-approval history |
+| Department | already had it | blocked by staff/requisitions/shifts/**expenses**/disbursements/wastage history (the `nullOnDelete` financial-table checks are why this list is longer than the others) |
+| MenuCategory | new | blocked while it still has menu items |
+| MenuItem | new | blocked by order history, a configured recipe, or breakfast-entitlement history (safe regardless — `order_items` snapshots its own name/price) |
+| Unit | new | blocked while a product still uses it |
+| Product | new | blocked by any purchasing/usage history (8 tables checked) — never touches the FIFO stock ledger itself |
+| Supplier | new | blocked by purchase-order or goods-receipt history |
+| Facility | new | blocked while it has rates or access history |
+| FacilityRate | new (alongside the existing enable/disable toggle) | blocked by access history |
+| LeaveType | new — **first CRUD screen this table has ever had** | blocked by leave-request or accrued-balance history |
+| PayrollDeductionType / Bracket | new | none needed (see above) — brackets cascade with their type |
+| Guest | new | **not a hard delete** — Guest already used `SoftDeletes`; "delete" just removes it from the active list (`guests.restore` reverses it), so every stay/reservation/payment keeps working unchanged and there is nothing to guard |
+| Company | new | blocked by stay or accounts-receivable history (both use `nullOnDelete`, which would otherwise silently strip which company a historical debt was billed to) |
+
+Every update/destroy action is audited (`AuditLogger`, following each module's existing action-naming
+convention) and every controller that lacked `AuditLogger` before now has it injected. UI: each screen's
+existing list view gained an inline "Edit" `<details>` panel and a "Delete" button with a confirm prompt,
+following the exact pattern already used on the Room board (§8.6) — nothing moved to a separate page.
+
+No migration. Regression coverage (new/extended, ~30 cases): `tests/Feature/Admin/RoomCategoryAdminTest.php`,
+`tests/Feature/Admin/DepartmentAdminTest.php`, `tests/Feature/Inventory/ProductAndUnitEditDeleteTest.php`,
+`tests/Feature/Inventory/SupplierTest.php`, `tests/Feature/Pos/MenuEditDeleteTest.php`,
+`tests/Feature/FrontOffice/FacilityEditDeleteTest.php`, `tests/Feature/FrontOffice/GuestEditDeleteTest.php`,
+`tests/Feature/FrontOffice/CompanyEditDeleteTest.php`, `tests/Feature/Hr/LeaveTest.php`,
+`tests/Feature/Hr/PayrollTest.php` — each covers the happy-path edit, at least one blocked-delete case, an
+allowed-delete case, and a role without the entity's permission being forbidden.

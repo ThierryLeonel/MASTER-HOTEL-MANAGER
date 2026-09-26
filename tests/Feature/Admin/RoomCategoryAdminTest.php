@@ -68,6 +68,31 @@ class RoomCategoryAdminTest extends TestCase
         $this->assertSame($category->id, $room->fresh()->room_category_id);
     }
 
+    /**
+     * Broader request ("...edit, delete and update all categories and
+     * every input, except financial inputs").
+     */
+    public function test_owner_can_delete_a_room_category_that_was_never_used(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $category = RoomCategory::factory()->create();
+
+        $this->actingAs($owner)->delete(route('admin.room-categories.destroy', $category))->assertRedirect();
+
+        $this->assertDatabaseMissing('room_categories', ['id' => $category->id]);
+    }
+
+    public function test_a_room_category_with_a_room_assigned_cannot_be_deleted(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $category = RoomCategory::factory()->create();
+        \App\Models\Room::factory()->create(['room_category_id' => $category->id]);
+
+        $this->actingAs($owner)->delete(route('admin.room-categories.destroy', $category))->assertSessionHasErrors('error');
+
+        $this->assertDatabaseHas('room_categories', ['id' => $category->id]);
+    }
+
     /** @dataProvider rolesWithoutManageSettings */
     public function test_roles_without_manage_settings_permission_are_forbidden(string $role): void
     {
