@@ -69,6 +69,23 @@
         @endif
     </div>
 
+    @can('delete-users')
+        <div class="rounded-lg bg-white p-6 shadow-sm">
+            <h2 class="mb-2 text-sm font-semibold">Delete account</h2>
+            <p class="mb-3 text-xs text-slate-500">
+                This removes {{ $targetUser->name }} from the active user list and blocks their login. Every
+                shift, folio, payment, and audit-log entry tied to this account is kept exactly as-is — nothing
+                historical is erased. Reversible from "Removed users" by an Owner.
+            </p>
+            <form method="POST" action="{{ route('admin.users.destroy', $targetUser) }}"
+                  onsubmit="return confirm(@js('Delete '.$targetUser->name.'\'s account? They will no longer be able to log in. This can be undone from Removed users.'));">
+                @csrf
+                @method('DELETE')
+                <button class="rounded bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-500">Delete account</button>
+            </form>
+        </div>
+    @endcan
+
     @if ($targetUser->auth_type === 'pin')
         <div class="rounded-lg bg-white p-6 shadow-sm space-y-4">
             <h2 class="text-sm font-semibold">PIN</h2>

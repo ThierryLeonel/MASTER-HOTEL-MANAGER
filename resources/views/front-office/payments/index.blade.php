@@ -36,6 +36,45 @@
                     <label class="block text-sm font-medium mb-1">What is this for?</label>
                     <input type="text" name="notes" required placeholder="e.g. Room rent, event hall hire…" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
                 </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Income source</label>
+                    {{--
+                        Direct request ("all in payment must be attached to
+                        an income source that is to be represented ... in
+                        the income statement"): every payment recorded on
+                        this screen is incoming money, so it must say what
+                        kind of income it is. Free text, same convention as
+                        an expense's category — shows up on the Income
+                        Statement under Revenue, grouped by exactly what's
+                        typed here.
+                    --}}
+                    <input type="text" name="income_source" required placeholder="e.g. Rent, Event hall hire, Commission" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="flex items-center gap-2 text-xs text-slate-600">
+                        <input type="checkbox" id="has_discount" onchange="document.getElementById('discount_fields').classList.toggle('hidden', !this.checked)">
+                        A discount was granted on this payment
+                    </label>
+                    {{--
+                        Direct request ("payments can involve discount if
+                        granted"): informational only — the Amount above
+                        is always the real cash actually received. No
+                        approval workflow here (unlike the separate,
+                        pre-existing room-rate Discount Approval workflow
+                        at check-in) — any staff recording the payment can
+                        note one.
+                    --}}
+                    <div id="discount_fields" class="hidden mt-2 space-y-2 rounded border border-slate-200 p-2">
+                        <div>
+                            <label class="block text-xs font-medium mb-1">Discount amount (XAF)</label>
+                            <input type="number" step="0.01" min="0.01" name="discount_amount" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium mb-1">Reason for the discount</label>
+                            <input type="text" name="discount_reason" placeholder="e.g. Loyal customer, negotiated rate" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                        </div>
+                    </div>
+                </div>
                 <button class="btn-action w-full rounded bg-green-700 px-3 py-2 text-sm text-white hover:bg-green-600">Record payment</button>
             </form>
         </div>
@@ -45,7 +84,7 @@
         <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
             <table class="w-full text-sm">
                 <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
-                    <tr><th class="p-3">Date</th><th class="p-3">Payment #</th><th class="p-3">Guest / payer</th><th class="p-3">Account</th><th class="p-3 text-right">Amount</th><th class="p-3">By</th></tr>
+                    <tr><th class="p-3">Date</th><th class="p-3">Payment #</th><th class="p-3">Guest / payer</th><th class="p-3">Income source</th><th class="p-3">Account</th><th class="p-3 text-right">Amount</th><th class="p-3">By</th></tr>
                 </thead>
                 <tbody class="divide-y">
                     @forelse ($payments as $payment)
@@ -53,12 +92,20 @@
                             <td class="p-3">{{ $payment->recorded_at->format('d M Y H:i') }}</td>
                             <td class="p-3">{{ $payment->payment_number }}</td>
                             <td class="p-3">{{ $payment->guest->full_name ?? $payment->notes }}</td>
+                            <td class="p-3">{{ $payment->income_source ?? '—' }}</td>
                             <td class="p-3">{{ $payment->financialAccount->name ?? str_replace('_', ' ', ucfirst($payment->method)) }}</td>
-                            <td class="p-3 text-right">{{ number_format($payment->amount, 0) }} XAF</td>
+                            <td class="p-3 text-right">
+                                {{ number_format($payment->amount, 0) }} XAF
+                                @if ($payment->hasDiscount())
+                                    <div class="text-[10px] text-amber-700" title="{{ $payment->discount_reason }}">
+                                        Gross {{ number_format($payment->grossAmount(), 0) }} &minus; discount {{ number_format($payment->discount_amount, 0) }}
+                                    </div>
+                                @endif
+                            </td>
                             <td class="p-3">{{ $payment->recordedBy->name }}</td>
                         </tr>
                     @empty
-                        <tr><td class="p-3 text-slate-500" colspan="6">No payments recorded yet.</td></tr>
+                        <tr><td class="p-3 text-slate-500" colspan="7">No payments recorded yet.</td></tr>
                     @endforelse
                 </tbody>
             </table>

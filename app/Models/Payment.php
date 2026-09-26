@@ -14,6 +14,20 @@ class Payment extends Model
         'guest_id', 'recorded_by', 'recorded_at', 'notes',
         // Correction round (audited defects #30 and #32).
         'business_date', 'shift_id', 'idempotency_key',
+        // Direct request ("all in payment must be attached to an income
+        // source that is to be represented ... in the income statement")
+        // — see this column's migration for why it's free text, and
+        // PaymentController::store() for where it's required.
+        'income_source',
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]") — see this migration's docblock and
+        // PaymentLedgerService::void() for the full reasoning. Never set
+        // directly; always go through void().
+        'voided_at', 'voided_by', 'void_reason',
+        // Direct request ("payments can involve discount if granted") —
+        // informational only; `amount` above is always the real net cash
+        // received. See this column's migration for the full reasoning.
+        'discount_amount', 'discount_reason',
     ];
 
     protected function casts(): array
@@ -22,7 +36,28 @@ class Payment extends Model
             'amount' => 'decimal:2',
             'recorded_at' => 'datetime',
             'business_date' => 'date',
+            'voided_at' => 'datetime',
+            'discount_amount' => 'decimal:2',
         ];
+    }
+
+    public function isVoided(): bool
+    {
+        return $this->voided_at !== null;
+    }
+
+    public function hasDiscount(): bool
+    {
+        return $this->discount_amount !== null && (float) $this->discount_amount > 0;
+    }
+
+    /**
+     * The normal/quoted price before the discount — `amount` is always
+     * the real net cash actually received (see this column's migration).
+     */
+    public function grossAmount(): float
+    {
+        return (float) $this->amount + (float) ($this->discount_amount ?? 0);
     }
 
     public function shift()
@@ -48,6 +83,11 @@ class Payment extends Model
     public function recordedBy()
     {
         return $this->belongsTo(User::class, 'recorded_by');
+    }
+
+    public function voidedBy()
+    {
+        return $this->belongsTo(User::class, 'voided_by');
     }
 
     public function reference()

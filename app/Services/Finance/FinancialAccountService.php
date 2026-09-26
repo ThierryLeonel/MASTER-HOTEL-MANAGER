@@ -47,8 +47,14 @@ class FinancialAccountService
      */
     public function currentBalance(FinancialAccount $account): float
     {
-        $in = (float) Payment::where('financial_account_id', $account->id)->where('direction', 'in')->sum('amount');
-        $out = (float) Payment::where('financial_account_id', $account->id)->where('direction', 'out')->sum('amount');
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]"): a voided payment (PaymentLedgerService::void())
+        // must stop counting toward this account's balance the instant
+        // it's voided — this is the one figure every other reconciliation
+        // in the app is ultimately built on, so it's the most important
+        // place this exclusion applies.
+        $in = (float) Payment::where('financial_account_id', $account->id)->where('direction', 'in')->whereNull('voided_at')->sum('amount');
+        $out = (float) Payment::where('financial_account_id', $account->id)->where('direction', 'out')->whereNull('voided_at')->sum('amount');
 
         return round((float) $account->opening_balance + $in - $out, 2);
     }

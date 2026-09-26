@@ -42,6 +42,7 @@ class PaymentModuleTest extends TestCase
             'financial_account_id' => $this->financialAccount('CASH')->id,
             'payer_name' => 'Event hall visitor',
             'notes' => 'Event hall hire, one evening',
+            'income_source' => 'Event hall hire',
         ])->assertRedirect();
 
         $payment = Payment::first();
@@ -54,6 +55,9 @@ class PaymentModuleTest extends TestCase
         // the kind of payment the owner described as needing to
         // reconcile — it now carries the real account it landed in.
         $this->assertSame($this->financialAccount('CASH')->id, $payment->financial_account_id);
+        // Direct request ("all in payment must be attached to an income
+        // source ... in the income statement").
+        $this->assertSame('Event hall hire', $payment->income_source);
     }
 
     public function test_front_desk_can_record_a_payment_against_an_existing_guest(): void
@@ -66,6 +70,7 @@ class PaymentModuleTest extends TestCase
             'financial_account_id' => $this->financialAccount('MTN')->id,
             'guest_id' => $guest->id,
             'notes' => 'Advance payment',
+            'income_source' => 'Guest advance',
         ])->assertRedirect();
 
         $payment = Payment::first();
@@ -89,6 +94,7 @@ class PaymentModuleTest extends TestCase
             'financial_account_id' => $this->financialAccount('BANK')->id,
             'payer_name' => 'Event hall visitor',
             'notes' => 'Event hall hire, one evening',
+            'income_source' => 'Event hall hire',
         ])->assertRedirect();
 
         $payment = Payment::first();
@@ -104,6 +110,86 @@ class PaymentModuleTest extends TestCase
         $this->actingAs($barStaff)->get(route('payments.index'))->assertForbidden();
         $this->actingAs($barStaff)->post(route('payments.store'), [
             'amount' => 1000, 'financial_account_id' => $this->financialAccount('CASH')->id, 'notes' => 'x',
+            'income_source' => 'x',
         ])->assertForbidden();
+    }
+
+    /**
+     * Direct request ("all in payment must be attached to an income
+     * source that is to be represented or seen in the income statement").
+     */
+    public function test_recording_a_general_payment_without_an_income_source_is_rejected(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        $response = $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 10000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'payer_name' => 'Visitor',
+            'notes' => 'Rent',
+        ]);
+
+        $response->assertSessionHasErrors('income_source');
+        $this->assertDatabaseMissing('payments', ['amount' => '10000.00']);
+    }
+
+    /**
+     * Direct request ("payments can involve discount if granted") —
+     * scoped to this screen. `amount` stays the real cash received;
+     * discount fields are informational (gross vs net), no approval
+     * workflow.
+     */
+    public function test_a_payment_can_record_a_discount_that_was_granted(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 18000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'payer_name' => 'Regular visitor',
+            'notes' => 'Event hall hire',
+            'income_source' => 'Event hall hire',
+            'discount_amount' => 2000,
+            'discount_reason' => 'Loyal customer',
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $this->assertSame('18000.00', $payment->amount, 'The recorded amount must stay the real net cash received.');
+        $this->assertSame('2000.00', $payment->discount_amount);
+        $this->assertSame('Loyal customer', $payment->discount_reason);
+        $this->assertTrue($payment->hasDiscount());
+        $this->assertSame(20000.0, $payment->grossAmount());
+    }
+
+    public function test_a_discount_amount_without_a_reason_is_rejected(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        $response = $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 18000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Event hall hire',
+            'income_source' => 'Event hall hire',
+            'discount_amount' => 2000,
+        ]);
+
+        $response->assertSessionHasErrors('discount_reason');
+        $this->assertDatabaseMissing('payments', ['amount' => '18000.00']);
+    }
+
+    public function test_a_payment_with_no_discount_reports_none(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 5000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Rent',
+            'income_source' => 'Rent',
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $this->assertFalse($payment->hasDiscount());
+        $this->assertSame(5000.0, $payment->grossAmount());
     }
 }

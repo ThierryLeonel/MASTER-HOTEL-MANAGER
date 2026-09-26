@@ -112,7 +112,7 @@
         @endif
     </div>
 
-    <div class="col-span-1 space-y-3">
+    <div class="col-span-1 space-y-3 hms-side-panel">
         @if ($stay->folio->status === 'open')
             @can('post-folio-charge')
                 <form method="POST" action="{{ route('folios.charge', $stay->folio) }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">

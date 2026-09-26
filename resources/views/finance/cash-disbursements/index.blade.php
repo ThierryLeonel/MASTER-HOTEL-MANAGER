@@ -69,7 +69,7 @@
         </div>
     </div>
 
-    <div class="lg:col-span-1 space-y-6">
+    <div class="lg:col-span-1 space-y-6 hms-side-panel">
         @can('authorize-cash-disbursement')
             <form method="POST" action="{{ route('finance.disbursement-tickets.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                 @csrf

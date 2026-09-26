@@ -15,6 +15,7 @@ use App\Http\Controllers\Finance\ExpenseController;
 use App\Http\Controllers\Finance\FinancialAccountController;
 use App\Http\Controllers\Finance\RefundController;
 use App\Http\Controllers\Finance\ShiftController;
+use App\Http\Controllers\Finance\TransactionController;
 use App\Http\Controllers\FrontOffice\CompanyController;
 use App\Http\Controllers\FrontOffice\DiscountApprovalController;
 use App\Http\Controllers\FrontOffice\FacilityAccessController;
@@ -574,6 +575,15 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:lock-accounting-day')
             ->post('/accounting-days/lock', [AccountingDayController::class, 'lock'])->name('accounting-days.lock');
 
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]") — Owner-only 'void-transactions' permission,
+        // same inline-middleware pattern as every other Owner-only screen
+        // in this file. See TransactionController's own docblock.
+        Route::middleware('permission:void-transactions')->prefix('transactions')->name('transactions.')->group(function () {
+            Route::get('/', [TransactionController::class, 'index'])->name('index');
+            Route::post('/{payment}/void', [TransactionController::class, 'void'])->name('void');
+        });
+
         // Cash disbursement (post-9.8 second fix round, PHASE9_AUDIT_AND_PLAN.md
         // §18) — distinct from Expenses. 'authorize-cash-disbursement' is
         // the management act of raising a ticket; 'record-cash-disbursement'
@@ -750,6 +760,14 @@ Route::middleware('auth')->group(function () {
         Route::post('/{user}/reset-password', [UserController::class, 'resetPassword'])->name('reset-password');
         Route::post('/{user}/reset-pin', [UserController::class, 'resetPin'])->name('reset-pin');
         Route::post('/{user}/unlock-pin', [UserController::class, 'unlockPin'])->name('unlock-pin');
+        // Direct request ("the owner is suppose to be able to delet
+        // user") — Owner-only 'delete-users' permission (separate from
+        // this whole group's 'manage-users'), same inline-middleware
+        // pattern as RoomController's 'edit-room-details' routes above.
+        // User already uses SoftDeletes, so restore() reverses this
+        // exactly like GuestController::restore() does for guests.
+        Route::post('/{user}/restore', [UserController::class, 'restore'])->middleware('permission:delete-users')->name('restore');
+        Route::delete('/{user}', [UserController::class, 'destroy'])->middleware('permission:delete-users')->name('destroy');
     });
 
     Route::middleware('permission:manage-departments')->prefix('admin/departments')->name('admin.departments.')->group(function () {

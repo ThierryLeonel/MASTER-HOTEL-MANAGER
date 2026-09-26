@@ -120,7 +120,7 @@
         </details>
     </div>
 
-    <div class="col-span-1 space-y-3">
+    <div class="col-span-1 space-y-3 hms-side-panel">
         <div class="rounded-lg bg-white p-4 shadow-sm text-sm space-y-1">
             <div class="text-xs font-medium">Reconciliation progress</div>
             @php $outstanding = $accounts->where('reconciledToday', false); @endphp

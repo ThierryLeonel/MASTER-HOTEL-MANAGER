@@ -104,10 +104,13 @@ class ShiftService
      */
     public function expectedCashFor(Shift $shift): float
     {
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]"): a voided payment must not count toward the
+        // expected cash figure staff reconcile their drawer against.
         $in = (float) Payment::where('method', 'cash')->where('direction', 'in')
-            ->where('shift_id', $shift->id)->sum('amount');
+            ->where('shift_id', $shift->id)->whereNull('voided_at')->sum('amount');
         $out = (float) Payment::where('method', 'cash')->where('direction', 'out')
-            ->where('shift_id', $shift->id)->sum('amount');
+            ->where('shift_id', $shift->id)->whereNull('voided_at')->sum('amount');
 
         return round((float) ($shift->opening_cash ?? 0) + $in - $out, 2);
     }
@@ -134,8 +137,10 @@ class ShiftService
     public function expectedByAccountFor(Shift $shift): \Illuminate\Support\Collection
     {
         // Correction round (audited defect #30): same shift_id-based
-        // filtering as expectedCashFor() above, for the same reason.
+        // filtering as expectedCashFor() above, for the same reason. Also
+        // excludes voided payments, same reasoning as expectedCashFor().
         return Payment::where('shift_id', $shift->id)
+            ->whereNull('voided_at')
             ->with('financialAccount')
             ->get()
             ->groupBy(fn (Payment $payment) => $payment->financial_account_id ?? 'unattributed')

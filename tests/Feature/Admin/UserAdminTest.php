@@ -163,4 +163,74 @@ class UserAdminTest extends TestCase
         $this->assertNull($target->pin_locked_until);
         $this->assertSame($originalHash, $target->pin_hash);
     }
+
+    /**
+     * Direct request ("the owner is suppose to be able to delet user").
+     * User already uses SoftDeletes (same as Guest), so this only sets
+     * deleted_at — the row, and everything that references it, stays put.
+     */
+    public function test_owner_can_delete_a_user_and_it_is_reversible(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $target = $this->userWithRole('cashier', ['auth_type' => 'password_only']);
+
+        $response = $this->actingAs($owner)->delete(route('admin.users.destroy', $target));
+
+        $response->assertRedirect(route('admin.users.index'));
+        $this->assertSoftDeleted('users', ['id' => $target->id]);
+
+        $restoreResponse = $this->actingAs($owner)->post(route('admin.users.restore', $target->id));
+
+        $restoreResponse->assertRedirect(route('admin.users.edit', $target));
+        $this->assertDatabaseHas('users', ['id' => $target->id, 'deleted_at' => null]);
+    }
+
+    public function test_an_owner_cannot_delete_their_own_account(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+
+        $response = $this->actingAs($owner)->delete(route('admin.users.destroy', $owner));
+
+        $response->assertSessionHasErrors('error');
+        $this->assertDatabaseHas('users', ['id' => $owner->id, 'deleted_at' => null]);
+    }
+
+    public function test_two_owners_can_delete_each_other_but_the_last_one_cannot_be_deleted(): void
+    {
+        $ownerA = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $ownerB = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+
+        // With two Owners, either can delete the other via the normal route.
+        $this->actingAs($ownerA)->delete(route('admin.users.destroy', $ownerB))->assertRedirect();
+        $this->assertSoftDeleted('users', ['id' => $ownerB->id]);
+
+        // Now $ownerA is the only Owner left. The self-delete guard would
+        // also block $ownerA deleting themselves, so the "last Owner"
+        // guard is exercised directly here, via a different actor, to
+        // prove it fires independently of the self-delete check.
+        $anotherActor = $this->userWithRole('general_manager', ['auth_type' => 'password_only']);
+
+        $this->expectException(\App\Exceptions\HmsException::class);
+        app(\App\Services\Admin\UserAdminService::class)->delete($ownerA, $anotherActor);
+    }
+
+    /** @dataProvider rolesWithoutManageUsers */
+    public function test_roles_without_delete_users_permission_cannot_delete_a_user(string $role): void
+    {
+        $user = $this->userWithRole($role, ['auth_type' => 'password_only']);
+        $target = $this->userWithRole('cashier', ['auth_type' => 'password_only']);
+
+        $this->actingAs($user)->delete(route('admin.users.destroy', $target))->assertForbidden();
+    }
+
+    public function test_general_manager_holds_manage_users_but_not_delete_users(): void
+    {
+        $gm = $this->userWithRole('general_manager', ['auth_type' => 'password_only']);
+        $target = $this->userWithRole('cashier', ['auth_type' => 'password_only']);
+
+        // General Manager can still reach the ordinary admin screen...
+        $this->actingAs($gm)->get(route('admin.users.index'))->assertOk();
+        // ...but deleting a user is Owner-only.
+        $this->actingAs($gm)->delete(route('admin.users.destroy', $target))->assertForbidden();
+    }
 }

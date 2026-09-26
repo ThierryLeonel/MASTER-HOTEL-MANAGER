@@ -36,7 +36,7 @@
         @endif
     </div>
 
-    <div class="col-span-1 space-y-3">
+    <div class="col-span-1 space-y-3 hms-side-panel">
         @if ($requisition->isPending())
             @can('approve-requisition')
                 <form method="POST" action="{{ route('inventory.requisitions.approve', $requisition) }}">

@@ -65,7 +65,7 @@
         </div>
     </div>
 
-    <div class="lg:col-span-1">
+    <div class="lg:col-span-1 hms-side-panel">
         @can('manage-own-shift')
             {{-- Post-9.8 third fix round: the department is no longer a
                  dropdown — it's always the logged-in user's own department

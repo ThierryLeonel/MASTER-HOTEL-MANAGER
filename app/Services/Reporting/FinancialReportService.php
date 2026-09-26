@@ -3,6 +3,7 @@
 namespace App\Services\Reporting;
 
 use App\Models\AccountsReceivable;
+use App\Models\CashDisbursement;
 use App\Models\Expense;
 use App\Models\FolioTransaction;
 use App\Models\Payment;
@@ -53,9 +54,13 @@ class FinancialReportService
     {
         $range = [$start->copy()->startOfDay(), $end->copy()->endOfDay()];
 
-        $cashIn = (float) Payment::where('direction', 'in')->whereBetween('recorded_at', $range)->sum('amount');
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]"): a voided payment (PaymentLedgerService::void())
+        // must not count toward cash flow either.
+        $cashIn = (float) Payment::where('direction', 'in')->whereNull('voided_at')->whereBetween('recorded_at', $range)->sum('amount');
 
         $outRows = Payment::where('direction', 'out')
+            ->whereNull('voided_at')
             ->whereBetween('recorded_at', $range)
             ->selectRaw('source_module, SUM(amount) as total')
             ->groupBy('source_module')
@@ -109,6 +114,102 @@ class FinancialReportService
     }
 
     /**
+     * Direct request ("all in payment must be attached to an income
+     * source that is to be represented or seen in the income statement"):
+     * `general_payment` is the general-purpose "record a payment" screen
+     * (PaymentController) — money that isn't a guest's room/POS bill (rent,
+     * a one-off visitor payment, etc.). Every payment recorded there is
+     * `direction = 'in'` (the ledger defaults to it and that screen never
+     * overrides it), and, since this correction round, is required to
+     * carry `income_source` (free text, same convention as
+     * `expenses.category`). Grouped by exactly what was typed, so a fresh
+     * `income_source` value shows up as its own line the very next time
+     * this report runs — no master list to keep in sync.
+     *
+     * @return array{by_source: array<string, float>, total: float}
+     */
+    public function otherIncomeBySource(Carbon $start, Carbon $end): array
+    {
+        $range = [$start->copy()->startOfDay(), $end->copy()->endOfDay()];
+
+        $rows = Payment::where('direction', 'in')
+            ->where('source_module', 'general_payment')
+            // Direct request ("the owner is suppose to be able to edit
+            // all transaction[s]"): a voided payment must not count as
+            // income either.
+            ->whereNull('voided_at')
+            ->whereBetween('recorded_at', $range)
+            ->selectRaw("COALESCE(NULLIF(income_source, ''), 'Uncategorized') as source, SUM(amount) as total")
+            ->groupBy('source')
+            ->pluck('total', 'source')
+            ->map(fn ($v) => (float) $v)
+            ->all();
+
+        return ['by_source' => $rows, 'total' => array_sum($rows)];
+    }
+
+    /**
+     * Direct request ("out payment related to expenses also represented
+     * in the income statement too"): audited while building the above —
+     * `expenseSummary()`'s `by_category` only ever reads the `expenses`
+     * table, so two genuine categories of real cash going out were
+     * completely invisible on the Income Statement before this:
+     *
+     *  - A `CashDisbursement` with no `expense_id` (a payout that never
+     *    went through the Expense request/approval flow at all — e.g. a
+     *    ticket-authorized disbursement). One that DOES have an
+     *    `expense_id` is deliberately excluded here — that money is
+     *    already counted exactly once, via the `Expense` row itself in
+     *    `expenseSummary()` (see `CashDisbursementService::disburse()`'s
+     *    docblock: the disbursement's ledger post IS that expense's
+     *    payment, never a second one), so including it here too would
+     *    double-count it.
+     *  - Payroll payouts (`PayrollService::pay()`, `source_module =
+     *    'payroll'`) — salaries never had ANY representation on this
+     *    report before.
+     *
+     * Both are read from the `payments` ledger itself (not the
+     * `cash_disbursements` table directly) so a voided payment
+     * (PaymentLedgerService::void() — direct request, "the owner is
+     * suppose to be able to edit all transaction[s]") is excluded
+     * automatically, the same way every other figure in this class is,
+     * with one `whereNull('voided_at')` rather than a second, separate
+     * exclusion mechanism on `cash_disbursements`.
+     *
+     * @return array{by_category: array<string, float>, total: float}
+     */
+    public function unrecognizedCashOutflows(Carbon $start, Carbon $end): array
+    {
+        $range = [$start->copy()->startOfDay(), $end->copy()->endOfDay()];
+
+        $disbursementPayments = Payment::where('direction', 'out')
+            ->where('source_module', 'cash_disbursement')
+            ->whereNull('voided_at')
+            ->whereBetween('recorded_at', $range)
+            ->with('reference')
+            ->get()
+            ->filter(fn (Payment $p) => $p->reference instanceof CashDisbursement && $p->reference->expense_id === null);
+
+        $byCategory = [];
+        foreach ($disbursementPayments as $payment) {
+            $category = $payment->reference->purpose;
+            $byCategory[$category] = ($byCategory[$category] ?? 0) + (float) $payment->amount;
+        }
+
+        $payrollTotal = (float) Payment::where('direction', 'out')
+            ->where('source_module', 'payroll')
+            ->whereNull('voided_at')
+            ->whereBetween('recorded_at', $range)
+            ->sum('amount');
+
+        if ($payrollTotal > 0) {
+            $byCategory['Payroll (salaries)'] = ($byCategory['Payroll (salaries)'] ?? 0) + $payrollTotal;
+        }
+
+        return ['by_category' => $byCategory, 'total' => array_sum($byCategory)];
+    }
+
+    /**
      * Phase 9.3 (PHASE9_AUDIT_AND_PLAN.md §3.4/§4.1): an Income Statement
      * in the strict accounting sense is a Chart-of-Accounts/General-Ledger
      * output, and this system has neither (confirmed by audit — there is
@@ -123,6 +224,29 @@ class FinancialReportService
      * double-entry Income Statement and must never be presented as one to
      * an auditor or investor without that caveat.
      *
+     * This correction round folds in two more real cash movements that
+     * were completely absent before — see `otherIncomeBySource()` and
+     * `unrecognizedCashOutflows()`'s own docblocks for exactly what and
+     * why. Both are merged straight into the same `revenue_by_type`/
+     * `expenses_by_category` maps (every consumer of this method already
+     * just iterates whatever keys are there), so nothing downstream needed
+     * to change to display them.
+     *
+     * Known remaining gap, found while auditing this — NOT fixed here,
+     * flagged for a future round the same way this engagement flags every
+     * finding it doesn't fold into the current request: a POS order
+     * closed with a direct payment method (a walk-in bar/restaurant sale
+     * paid on the spot, never deferred to a guest's folio —
+     * `OrderService::close()`) posts straight to the `payments` ledger and
+     * NEVER creates a `FolioTransaction`. Since `revenue_by_type` below is
+     * still sourced from `revenueByChargeType()` (accrual, FolioTransaction
+     * -based), that walk-in revenue is invisible here — only room/POS
+     * charges that were actually posted to a folio show up. Closing this
+     * one properly means deciding how to blend accrual folio revenue with
+     * cash POS revenue without double-counting a POS sale that's later
+     * deferred to a folio anyway; that's a bigger design decision than
+     * this round's scope.
+     *
      * @return array{
      *   revenue_by_type: array<string, float>, total_revenue: float,
      *   expenses_by_category: array<string, float>, total_expenses: float,
@@ -133,13 +257,28 @@ class FinancialReportService
     {
         $revenue = $this->revenueByChargeType($start, $end);
         $expenses = $this->expenseSummary($start, $end);
+        $otherIncome = $this->otherIncomeBySource($start, $end);
+        $unrecognizedOutflows = $this->unrecognizedCashOutflows($start, $end);
+
+        $revenueByType = $revenue['by_type'];
+        foreach ($otherIncome['by_source'] as $source => $amount) {
+            $revenueByType[$source] = ($revenueByType[$source] ?? 0) + $amount;
+        }
+
+        $expensesByCategory = $expenses['by_category'];
+        foreach ($unrecognizedOutflows['by_category'] as $category => $amount) {
+            $expensesByCategory[$category] = ($expensesByCategory[$category] ?? 0) + $amount;
+        }
+
+        $totalRevenue = $revenue['total'] + $otherIncome['total'];
+        $totalExpenses = $expenses['total_requested'] + $unrecognizedOutflows['total'];
 
         return [
-            'revenue_by_type' => $revenue['by_type'],
-            'total_revenue' => $revenue['total'],
-            'expenses_by_category' => $expenses['by_category'],
-            'total_expenses' => $expenses['total_requested'],
-            'net_operating_result' => $revenue['total'] - $expenses['total_requested'],
+            'revenue_by_type' => $revenueByType,
+            'total_revenue' => $totalRevenue,
+            'expenses_by_category' => $expensesByCategory,
+            'total_expenses' => $totalExpenses,
+            'net_operating_result' => $totalRevenue - $totalExpenses,
         ];
     }
 
@@ -161,13 +300,19 @@ class FinancialReportService
             ->orderByDesc('recorded_at')
             ->get();
 
-        $byMethod = $payments->groupBy('method')->map(fn (Collection $group) => (float) $group->sum('amount'));
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]"): a voided row still appears in the printed
+        // detail list below (transparency — the same way a voided
+        // FolioTransaction stays visible rather than disappearing), but
+        // must not count toward the by-method/total figures.
+        $notVoided = $payments->whereNull('voided_at');
+        $byMethod = $notVoided->groupBy('method')->map(fn (Collection $group) => (float) $group->sum('amount'));
 
         return [
             'payments' => $payments,
             'by_method' => $byMethod,
-            'total_in' => (float) $payments->where('direction', 'in')->sum('amount'),
-            'total_out' => (float) $payments->where('direction', 'out')->sum('amount'),
+            'total_in' => (float) $notVoided->where('direction', 'in')->sum('amount'),
+            'total_out' => (float) $notVoided->where('direction', 'out')->sum('amount'),
         ];
     }
 

@@ -72,15 +72,18 @@ class DepartmentReconciliationReportService
         )->values();
 
         $rows = $departments->map(function (Department $department) use ($range, $start, $end) {
+            // Direct request ("the owner is suppose to be able to edit
+            // all transaction[s]"): a voided payment must not count
+            // toward any department's reconciliation figures either.
             $cashIn = (float) Payment::where('department_id', $department->id)
                 ->where('direction', 'in')->where('method', 'cash')
-                ->whereBetween('recorded_at', $range)->sum('amount');
+                ->whereNull('voided_at')->whereBetween('recorded_at', $range)->sum('amount');
             $cashOut = (float) Payment::where('department_id', $department->id)
                 ->where('direction', 'out')->where('method', 'cash')
-                ->whereBetween('recorded_at', $range)->sum('amount');
+                ->whereNull('voided_at')->whereBetween('recorded_at', $range)->sum('amount');
             $nonCashIn = (float) Payment::where('department_id', $department->id)
                 ->where('direction', 'in')->where('method', '!=', 'cash')
-                ->whereBetween('recorded_at', $range)->sum('amount');
+                ->whereNull('voided_at')->whereBetween('recorded_at', $range)->sum('amount');
 
             // Fourth post-9.8 fix round (day-close rebuild): the single
             // lumped `non_cash_in` figure above used to be the only
@@ -94,6 +97,7 @@ class DepartmentReconciliationReportService
             // missing one.
             $nonCashByAccount = Payment::where('department_id', $department->id)
                 ->where('direction', 'in')->where('method', '!=', 'cash')
+                ->whereNull('voided_at')
                 ->whereBetween('recorded_at', $range)
                 ->with('financialAccount')
                 ->get()

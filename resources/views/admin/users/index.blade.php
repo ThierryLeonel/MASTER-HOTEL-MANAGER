@@ -7,7 +7,16 @@
                class="rounded border border-slate-300 px-3 py-1.5 text-sm w-72">
         <button class="rounded bg-slate-200 px-3 py-1.5 text-sm hover:bg-slate-300">Search</button>
     </form>
-    <a href="{{ route('admin.users.create') }}" class="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">+ New user</a>
+    <div class="flex gap-2">
+        @can('delete-users')
+            @if (request()->boolean('trashed'))
+                <a href="{{ route('admin.users.index') }}" class="rounded bg-white border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100">Back to active users</a>
+            @else
+                <a href="{{ route('admin.users.index', ['trashed' => 1]) }}" class="rounded bg-white border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100">Removed users</a>
+            @endif
+        @endcan
+        <a href="{{ route('admin.users.create') }}" class="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">+ New user</a>
+    </div>
 </div>
 
 <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
@@ -42,7 +51,16 @@
                         @endif
                     </td>
                     <td class="p-3 text-right">
-                        <a href="{{ route('admin.users.edit', $user) }}" class="text-slate-600 hover:underline">Edit</a>
+                        @if ($user->trashed())
+                            @can('delete-users')
+                                <form method="POST" action="{{ route('admin.users.restore', $user) }}" class="inline">
+                                    @csrf
+                                    <button class="text-green-700 hover:underline">Restore</button>
+                                </form>
+                            @endcan
+                        @else
+                            <a href="{{ route('admin.users.edit', $user) }}" class="text-slate-600 hover:underline">Edit</a>
+                        @endif
                     </td>
                 </tr>
             @endforeach

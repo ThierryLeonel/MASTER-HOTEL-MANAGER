@@ -65,6 +65,24 @@ class PaymentController extends Controller
             'guest_id' => 'nullable|exists:guests,id',
             'payer_name' => 'nullable|string|max:255',
             'notes' => 'required|string|max:255',
+            // Direct request ("all in payment must be attached to an
+            // income source that is to be represented ... in the income
+            // statement"): every payment recorded here is money coming
+            // in (PaymentLedgerService::record() defaults `direction` to
+            // 'in', and this screen never overrides it), so every one of
+            // them must say what kind of income it is — free text, same
+            // convention as Expense::category, so no fixed list to
+            // maintain. Feeds FinancialReportService::otherIncomeBySource().
+            'income_source' => 'required|string|max:120',
+            // Direct request ("payments can involve discount if
+            // granted"): `amount` above is always what was actually
+            // received; a discount, if one was granted, is recorded
+            // alongside it purely for transparency (gross vs net) — see
+            // this column's migration. Both optional; `discount_reason`
+            // is required the moment an amount is given, so "a discount
+            // was granted" is never recorded without saying why.
+            'discount_amount' => 'nullable|numeric|min:0.01',
+            'discount_reason' => 'required_with:discount_amount|nullable|string|max:255',
         ]);
 
         $guest = ! empty($data['guest_id']) ? Guest::find($data['guest_id']) : null;
@@ -90,6 +108,9 @@ class PaymentController extends Controller
             guestId: $guest?->id,
             notes: $description,
             financialAccountId: $account->id,
+            incomeSource: $data['income_source'],
+            discountAmount: isset($data['discount_amount']) ? (float) $data['discount_amount'] : null,
+            discountReason: $data['discount_reason'] ?? null,
         );
 
         return back()->with('status', 'Payment recorded.');

@@ -6,8 +6,10 @@ use App\Models\AccountsReceivable;
 use App\Models\Expense;
 use App\Models\Folio;
 use App\Models\Stay;
+use App\Services\Finance\CashDisbursementService;
 use App\Services\Finance\ExpenseService;
 use App\Services\FrontOffice\FolioService;
+use App\Services\PaymentLedgerService;
 use App\Services\Reporting\FinancialReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -157,6 +159,102 @@ class FinancialReportTest extends TestCase
         $this->assertSame(0.0, $statement['total_revenue']);
         $this->assertSame(20000.0, $statement['total_expenses']);
         $this->assertSame(-20000.0, $statement['net_operating_result']);
+    }
+
+    /**
+     * Direct request ("all in payment must be attached to an income
+     * source that is to be represented or seen in the income statement").
+     */
+    public function test_income_statement_includes_general_payments_grouped_by_income_source(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $this->openShiftFor('FO');
+
+        app(PaymentLedgerService::class)->record(
+            amount: 20000,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'Rent',
+        );
+        app(PaymentLedgerService::class)->record(
+            amount: 5000,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'Rent',
+        );
+
+        $statement = app(FinancialReportService::class)->incomeStatement(Carbon::today(), Carbon::today());
+
+        $this->assertSame(25000.0, $statement['revenue_by_type']['Rent']);
+        $this->assertSame(25000.0, $statement['total_revenue']);
+        $this->assertSame(25000.0, $statement['net_operating_result']);
+    }
+
+    /**
+     * Direct request ("out payment related to expenses also represented
+     * in the income statement too") — audited gap: a ticket-less
+     * disbursement with no linked Expense, and a payroll payout, were
+     * both previously invisible on this report.
+     */
+    public function test_income_statement_includes_disbursements_without_an_expense_and_payroll_payouts(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        app(CashDisbursementService::class)->disburse([
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'paid_to' => 'Local supplier',
+            'purpose' => 'Emergency plumbing repair',
+            'amount' => 20000,
+            'authorized_by_name' => 'General Manager',
+        ], $accountant);
+
+        app(PaymentLedgerService::class)->record(
+            amount: 150000,
+            method: 'bank_transfer',
+            sourceModule: 'payroll',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('BANK')->id,
+        );
+
+        $statement = app(FinancialReportService::class)->incomeStatement(Carbon::today(), Carbon::today());
+
+        $this->assertSame(20000.0, $statement['expenses_by_category']['Emergency plumbing repair']);
+        $this->assertSame(150000.0, $statement['expenses_by_category']['Payroll (salaries)']);
+        $this->assertSame(170000.0, $statement['total_expenses']);
+        $this->assertSame(-170000.0, $statement['net_operating_result']);
+    }
+
+    /**
+     * A disbursement that DOES reference an approved Expense must not be
+     * counted twice — once via the Expense row (expenseSummary()) and
+     * again via the disbursement's own ledger post.
+     */
+    public function test_income_statement_does_not_double_count_a_disbursement_linked_to_an_expense(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        app(ExpenseService::class)->request(8000, 'Supplies', 'Cleaning', $accountant);
+        $expense = Expense::first();
+        app(ExpenseService::class)->approve($expense, $accountant);
+
+        app(CashDisbursementService::class)->disburse([
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'paid_to' => 'Cleaning supplier',
+            'purpose' => 'Cleaning supplies',
+            'amount' => 8000,
+            'expense_id' => $expense->id,
+            'authorized_by_name' => 'General Manager',
+        ], $accountant);
+
+        $statement = app(FinancialReportService::class)->incomeStatement(Carbon::today(), Carbon::today());
+
+        $this->assertSame(8000.0, $statement['expenses_by_category']['Supplies']);
+        $this->assertArrayNotHasKey('Cleaning supplies', $statement['expenses_by_category']);
+        $this->assertSame(8000.0, $statement['total_expenses']);
     }
 
     public function test_duty_manager_cannot_view_the_income_statement(): void

@@ -23,7 +23,7 @@
         {{ $stockCounts->links() }}
     </div>
 
-    <div class="col-span-1">
+    <div class="col-span-1 hms-side-panel">
         <form method="POST" action="{{ route('inventory.stock-counts.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             @csrf
             <div class="text-xs font-medium">Start a new stock count</div>

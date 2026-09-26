@@ -1365,3 +1365,238 @@ keep in sync; §9.1–9.7 and the department-prefill part of §9.9 have **no new
 this delivery — they should be exercised manually (or covered by a follow-up test-writing pass) before
 being relied on in production, exactly as this engagement has flagged for every round where execution
 wasn't possible.
+
+## 10. Owner can delete a user account, and a scrolling follow-up
+
+### 10.1 "The owner is suppose to be able to delet user"
+
+Before this, `admin/users` had no delete of any kind — only `activate`/`deactivate` (a soft on/off switch).
+`User` already uses `SoftDeletes` (exactly like `Guest` — see both models), and 67 separate foreign keys
+across the schema reference `users.id`, so this is deliberately never a hard delete: every shift, folio,
+payment, audit-log entry, etc. a deleted account ever touched keeps pointing at a real row, unchanged.
+"Delete" removes the account from the active list and blocks login; it is fully reversible from a new
+"Removed users" list.
+
+New pieces, following the exact template `GuestController::destroy()`/`restore()` already established:
+
+- **`UserAdminService::delete(User $user, User $actor)`** — audits `admin.user_deleted`, then
+  `$user->delete()`. Two guards (both throwing `HmsException`, surfaced the same way the existing
+  self-deactivate guard already is — a session `error`, per `test_an_owner_cannot_deactivate_their_own_account`):
+  you cannot delete your own account, and you cannot delete the last remaining Owner account (the one role
+  every permission check bypasses via `Gate::before` — losing every Owner would leave nobody able to
+  restore it or reach the admin screens that require this permission).
+- **`UserAdminService::restore(int $userId, User $actor)`** — `User::onlyTrashed()->findOrFail()`, restore,
+  audit `admin.user_restored`.
+- **`UserController::destroy()`/`restore()`** — thin wrappers, same shape as every other action on this
+  controller.
+- **New permission `delete-users`**, deliberately separate from `manage-users` (which General Manager also
+  holds, and which still covers create/edit/deactivate/credential-reset) — Owner-only, excluded from
+  General Manager's grant, exactly the same pattern already used for `manage-system-data` and
+  `edit-room-details`. Routes: `DELETE admin/users/{user}` and `POST admin/users/{user}/restore` both carry
+  `middleware('permission:delete-users')` **in addition to** the group's existing `permission:manage-users`
+  — stacked, not replaced — the same inline-middleware pattern `RoomController`'s
+  `edit-room-details`-gated routes already use.
+- **UI**: `admin/users/index.blade.php` gained a "Removed users" / "Back to active users" toggle
+  (`?trashed=1`, mirroring `guests.index` exactly) and a Restore button on trashed rows;
+  `admin/users/edit.blade.php` gained a "Delete account" card, gated on `@can('delete-users')`, with a
+  confirm dialog explaining the action is reversible and that nothing historical is erased.
+
+New tests in `tests/Feature/Admin/UserAdminTest.php`: delete-then-restore round-trips and un-deletes the
+account; an Owner cannot delete their own account; with two Owners either can delete the other, but the
+service-level "last Owner" guard fires (tested directly, since the self-delete guard would otherwise mask
+it) once only one is left; roles without `manage-users` get a 403, same table as the existing test; and
+specifically, a General Manager — who already holds `manage-users` — still gets a 403 on delete because
+`delete-users` is Owner-only.
+
+### 10.2 Follow-up to the scrolling fix (§9.1): side panels that scroll away from a long list
+
+Reported directly against the Restaurant Menu screen ("places like this we are supose to have about 3
+scroll bars"): §9.1 gave the shell exactly two independent scroll regions — the nav and the content area —
+but on any page that lays out a long list next to a short "add/create" panel (menu categories + items next
+to "New category"/"New menu item"; expenses next to "Request an expense"; disbursements next to "Record a
+finance disbursement"; and 22 other views using the same 2/3+1/3 grid), that side panel scrolled away with
+the list. On a long menu you had to scroll all the way back to the top to reach the "add" form again.
+
+Added a `.hms-side-panel` rule next to §9.1's fix in `layouts/app.blade.php`: on desktop, the panel becomes
+`position: sticky` at the top of the content area, and if the panel's own content is ever taller than the
+screen it gets its own bounded, independent scrollbar (`max-height` + `overflow-y: auto`) instead of
+stretching the page. Applied the class to the side-panel column (never the list column, which is meant to
+keep growing) in all 26 views using this grid pattern:
+`pos/menu/index.blade.php`, `pos/menu/recipe.blade.php`, `finance/expenses/index.blade.php`,
+`finance/cash-disbursements/index.blade.php`, `finance/shifts/index.blade.php`,
+`finance/accounts-receivable/index.blade.php`, `finance/financial-accounts/index.blade.php`,
+`finance/accounting-days/index.blade.php`, `hr/attendance/index.blade.php`, `hr/employees/index.blade.php`,
+`hr/leave/index.blade.php`, `hr/payroll/deductions.blade.php`, `hr/payroll/runs-index.blade.php`,
+`front-office/companies/index.blade.php`, `front-office/reservations/show.blade.php`,
+`front-office/housekeeping/index.blade.php`, `front-office/stays/show.blade.php`,
+`front-office/maintenance/index.blade.php`, `front-office/facility-access/index.blade.php`,
+`inventory/purchase-orders/show.blade.php`, `inventory/requisitions/show.blade.php`,
+`inventory/stock-counts/index.blade.php`, `inventory/products/index.blade.php`,
+`inventory/suppliers/index.blade.php`, `inventory/goods-receipts/index.blade.php`,
+`inventory/wastage/index.blade.php`. Result: a page like this now has three independent scroll regions —
+the nav, the list, and the side panel — matching what was asked for.
+
+This was a mechanical, additive change (one extra CSS class appended to an existing `class="..."` attribute
+per file, no new tags, no markup restructuring), verified file-by-file: each of the 26 target lines matched
+exactly once before editing (no ambiguous/duplicate matches), and every touched view still balances
+`@if/@endif`, `@can/@endcan`, `@foreach/@endforeach`, `<form>/</form>`, and `<div>/</div>` afterwards.
+
+### 10.3 Testing disclosure for this round
+
+Same standing limitation as every round: no `vendor/`, no Packagist access, so only `php -l` was run (all
+PHP files touched this round pass) plus the directive/tag-balance checks described above for every touched
+Blade file. The delete-user feature has new PHPUnit test cases (listed in §10.1) written to this
+engagement's existing testing conventions — they have not been executed. The scrolling fix has no
+executable test (it's CSS layout behavior) and should be spot-checked visually on a long list — e.g. the
+Restaurant Menu screen with many categories — before being relied on.
+
+## 11. Every incoming payment needs an income source; every real cash outflow now shows on the Income Statement
+
+Direct request: "the accountant may record payments that are come in and all in payment must be attached to
+an income source that is to be represented or seen in the income statement and out payment related to
+expenses also represented in the income statement too."
+
+### 11.1 What already existed
+
+The general-purpose "record a payment" screen (`PaymentController`/`front-office/payments`, permission
+`record-payment`) already let the accountant (and front desk) record money coming in that isn't a guest's
+room/POS bill — rent, a one-off visitor payment, etc. It had no classification beyond a free-text `notes`
+field, and — this is the real finding — **that income never appeared on the Income Statement at all**:
+`FinancialReportService::incomeStatement()`'s revenue side only ever read `FolioTransaction` (charges posted
+to a guest's folio), so a rent payment recorded on that screen was invisible to it.
+
+On the expense side, `expenses_by_category` already existed and does work — but only for the `Expense`
+request/approval/payment workflow. Auditing every place money actually leaves the building
+(`grep`-ing every `direction: 'out'` ledger call) found two more that were completely invisible on the
+report: a `CashDisbursement` with no linked `Expense` (a ticket-authorized payout, or one authorized by a
+named superior with no expense request behind it), and every payroll payout (`PayrollService::pay()`) —
+salaries had zero representation on the Income Statement before this.
+
+### 11.2 What changed
+
+- **New `payments.income_source` column** (nullable, free text — same convention as `expenses.category`; see
+  its migration's docblock). **Required** by `PaymentController::store()` specifically — every other kind of
+  payment (folio, POS, expense, disbursement, payroll) is already self-describing via `source_module`/
+  `reference_type` and is unaffected.
+- **`PaymentLedgerService::record()`** gained an optional `incomeSource` parameter, persisted straight to the
+  new column — it remains the single writer of the `payments` table.
+- **`front-office/payments/index.blade.php`**: the "Record a payment" form has a new required "Income
+  source" field (free text — "Rent", "Event hall hire", "Commission", whatever fits), and the payments table
+  shows it as its own column.
+- **`FinancialReportService::otherIncomeBySource()`** (new): sums `general_payment` `direction=in` payments
+  in range, grouped by `income_source` (a null/blank value — only possible on payments recorded before this
+  round — groups as "Uncategorized" rather than being silently dropped).
+- **`FinancialReportService::unrecognizedCashOutflows()`** (new): sums the two previously-invisible outflow
+  categories found in the audit — a `CashDisbursement` with `expense_id IS NULL`, grouped by its `purpose`;
+  and every `payroll`-sourced payment, labeled "Payroll (salaries)". A disbursement that DOES reference an
+  Expense is deliberately excluded here (see the method's docblock) — that money is already counted exactly
+  once via the `Expense` row in `expenseSummary()`, and including it again here would double-count it.
+- **`FinancialReportService::incomeStatement()`**: both new breakdowns are merged straight into the existing
+  `revenue_by_type`/`expenses_by_category` maps and rolled into `total_revenue`/`total_expenses`/
+  `net_operating_result`. Every existing consumer (the Income Statement screen/print, the Weekly Owner
+  Summary, the dashboard's mini income-statement card) needed no changes — they already just iterate
+  whatever keys are in these maps. Two sentences in the Weekly Owner Summary ("revenue charged to guest
+  folios" / "expenses requested") were reworded slightly for accuracy now that the figures include more than
+  folio charges and requested expenses.
+
+### 11.3 Known gap found, not fixed here (flagged for a future round)
+
+While auditing this, found that a POS order closed with a direct payment method — any walk-in bar/
+restaurant/front-desk sale paid on the spot, never deferred to a guest's folio
+(`OrderService::close()`) — posts straight to the `payments` ledger and **never creates a
+`FolioTransaction`**. Since the Income Statement's revenue side is still sourced from
+`revenueByChargeType()` (accrual, `FolioTransaction`-based), **that walk-in POS revenue is invisible on the
+Income Statement** — only room/POS charges actually posted to a folio show up. This is a materially larger
+gap than the ones closed above (potentially a big share of day-to-day bar/restaurant revenue) but properly
+closing it means deciding how to blend accrual folio revenue with cash POS revenue without double-counting
+a POS sale that's later deferred to a folio anyway — a bigger design decision than this round's scope. Flagged
+here exactly the way this engagement flags every finding it doesn't fold into the current request.
+
+### 11.4 Testing disclosure
+
+New/updated tests: `tests/Feature/FrontOffice/PaymentModuleTest.php` (income source required and persisted;
+existing tests updated to pass it) and `tests/Feature/Reporting/FinancialReportTest.php` (general payments
+grouped by income source on the statement; a disbursement-without-expense and a payroll payout both show up;
+a disbursement that DOES reference an expense is proven NOT double-counted). Same standing limitation as
+every round — no `vendor/`, so these were written to this engagement's conventions but not executed; `php -l`
+passes project-wide and the touched Blade views balance.
+
+## 12. Owner can void (never edit-in-place) any transaction
+
+Direct request: "the owner is suppose to be able to edit all transaction[s]." Clarified before building
+anything (this conflicts with this whole engagement's standing rule — never rewrite historical financial
+records — and this system has NO edit capability for any posted transaction today, for any role): the
+answer was void-then-correct, the same reversible pattern already used for folio charges, never an in-place
+rewrite of a posted amount.
+
+### 12.1 Why one fix covers every kind of transaction
+
+`PaymentLedgerService` is already the single point of entry for every payment, refund, expense payout,
+disbursement, and payroll payout in the system (see its own long-standing docblock) — every one of them
+posts through the one `payments` table. That meant "edit all transactions" could be answered in exactly one
+place rather than needing separate void logic bolted onto Expense, CashDisbursement, Order, and Payslip
+individually.
+
+- **`payments.voided_at`/`voided_by`/`void_reason`** (new, nullable, additive — see the migration's
+  docblock for why this is simpler than `FolioTransaction::void()`'s mark-plus-reversal-entry approach:
+  `FinancialAccount` balances, and every other total in this app, are already computed LIVE by summing
+  `payments.amount`, so a `whereNull('voided_at')` on that one column is sufficient — no second corrective
+  entry needs posting).
+- **`PaymentLedgerService::void(Payment $payment, string $reason, User $actor)`** (new): locks the row,
+  refuses to void something already voided, sets the three columns above — nothing else is ever touched —
+  and flags that account's today reconciliation stale (the same thing a new payment posting already does),
+  reusing a small `flagReconciliationStale()` helper factored out of `record()`.
+- **New Owner-only permission `void-transactions`**, same pattern as `manage-system-data`/
+  `edit-room-details`/`delete-users` — excluded from General Manager's grant.
+- **New screen, "All Transactions"** (`Finance\TransactionController`, `finance/transactions`): every
+  payment in the system, filterable by module/search, with a Void button (reason required, same
+  `promptVoidReason()` confirm pattern the folio void button already uses) on any not-yet-voided row. A
+  voided row stays visible, greyed out, showing who voided it, when, and why — nothing disappears.
+- **Every financial total that sums `payments.amount` now excludes voided rows**: `FinancialAccountService::
+  currentBalance()` (the account balance itself — the most important one), `ShiftService::
+  expectedCashFor()`/`expectedByAccountFor()`, `CashReconciliationService::expectedCashFor()`,
+  `DepartmentReconciliationReportService::forRange()`, and `FinancialReportService::cashFlow()`/
+  `otherIncomeBySource()`/`unrecognizedCashOutflows()` (rewritten to read the disbursement side from
+  `payments` directly rather than `cash_disbursements`, so the same one `whereNull('voided_at')` covers it —
+  see that method's updated docblock) /`paymentSummary()` (the printed detail list still SHOWS a voided row,
+  for the audit trail, but it drops out of the by-method/total figures).
+
+### 12.2 Deliberate scope limit
+
+Voiding a `Payment` corrects the CASH/financial figures only. It does **not** automatically revert the
+state of whatever business record generated it — an `Expense` stays `paid`, a closed POS `Order` stays
+closed, a `Payslip` stays `paid`. If the underlying record also needs reopening to be reprocessed, that is
+a separate, module-specific action, out of scope for this generic ledger-level fix, and is called out
+directly on the "All Transactions" screen itself so nobody is surprised by it.
+
+### 12.3 Testing disclosure
+
+New `tests/Feature/Finance/TransactionVoidTest.php`: a voided payment stops counting toward its account's
+balance immediately; the original row's amount is provably untouched; a payment can't be voided twice; a
+reason is required; every role other than Owner (including General Manager) gets a 403 on both the screen
+and the void action. Same standing limitation as every round — not executed, `php -l` passes project-wide,
+the new view's directive/tag balance checks pass.
+
+## 13. Payments can record a discount, if one was granted
+
+Direct request: "payments can involve discount if granted." Clarified before building (this system already
+has a separate, approval-gated Discount Approval workflow for room-rate discounts at check-in, and the
+request could have meant that): scoped to the general-purpose "record a payment" screen specifically, with
+no approval workflow — any staff recording the payment can just note one.
+
+- **`payments.discount_amount`/`discount_reason`** (new, nullable, additive). `payments.amount` is
+  unchanged in meaning and always the real net cash actually received — these two columns are purely
+  informational, recording how much less than the normal/quoted price was collected, and why.
+- **`PaymentLedgerService::record()`** gained optional `discountAmount`/`discountReason` parameters.
+- **`PaymentController::store()`**: both optional; `discount_reason` becomes required the moment a
+  `discount_amount` is given, so a discount is never recorded without a stated reason.
+- **`Payment::hasDiscount()`/`grossAmount()`** (new helpers) — the "record a payment" screen's form has a
+  "A discount was granted" checkbox revealing amount/reason fields, and its payments table shows "Gross X −
+  discount Y" under the collected amount whenever one applies.
+
+### 13.1 Testing disclosure
+
+New tests in `tests/Feature/FrontOffice/PaymentModuleTest.php`: a discount records correctly and the
+recorded `amount` stays the real net cash received; a discount amount without a reason is rejected; a
+payment with no discount reports none. Same standing limitation as every round — not executed, `php -l`
+passes project-wide, the touched view's directive/tag balance checks pass.

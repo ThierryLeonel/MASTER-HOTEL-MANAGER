@@ -578,6 +578,45 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Owner can void (never edit-in-place) any transaction; payments can record a discount (`CORRECTION_ROUND_34_DELIVERY.md` §12–13)**
+- Direct request: "the owner is suppose to be able to edit all transaction[s]." This system has no in-place
+  edit for any posted transaction, for any role — and rewriting a posted amount would violate this
+  engagement's own standing rule and silently invalidate every reconciliation computed since. Clarified
+  first: the answer is void-then-correct, the same reversible mechanism folio charges already use. Because
+  every payment, refund, expense payout, disbursement, and payroll payout already flows through the one
+  central `payments` ledger, one fix covers all of them: a new Owner-only "All Transactions" screen lets the
+  Owner void any of them (reason required, nothing ever overwritten), and every account balance,
+  reconciliation, and report that sums the ledger now correctly excludes a voided row (§12).
+- Direct request: "payments can involve discount if granted." Clarified first (there's a separate, existing
+  approval-gated discount workflow for room rates — this is not that): the general "record a payment"
+  screen can now note an optional discount (amount + reason, no approval needed) — the recorded amount
+  always stays the real cash received; the discount is shown alongside it as gross vs net (§13).
+
+**Every incoming payment needs an income source; expenses' cash outflows are now complete on the Income Statement (`CORRECTION_ROUND_34_DELIVERY.md` §11)**
+- Direct request: "all in payment must be attached to an income source ... and out payment related to
+  expenses also represented in the income statement too." The general "record a payment" screen (rent, a
+  one-off visitor payment, etc.) now requires an Income Source, and — this was the real gap — that income
+  had never appeared on the Income Statement at all; it now does, grouped by source (§11.1–11.2).
+- Audit of every place real cash leaves the building found two more categories invisible on the Income
+  Statement: a Finance Disbursement with no linked Expense, and every payroll payout (salaries had zero
+  representation before). Both now show up, without double-counting a disbursement that DOES reference an
+  Expense (§11.2).
+- Found but NOT fixed this round, flagged for a dedicated follow-up: a walk-in POS sale paid on the spot
+  (never deferred to a guest's folio) is still invisible on the Income Statement's revenue side — see §11.3
+  for why closing it properly is a bigger design decision than this round's scope.
+
+**Owner can delete a user account, and a scrolling follow-up (`CORRECTION_ROUND_34_DELIVERY.md` §10)**
+- Direct request: "the owner is suppose to be able to delet user." `User` already used `SoftDeletes` (same
+  as Guest), so this is a reversible remove-from-active-list, never a hard delete — nothing referencing the
+  67 foreign keys pointing at `users.id` is touched. New "Removed users" list with Restore, and a new
+  Owner-only `delete-users` permission kept separate from `manage-users` (General Manager still can't delete
+  a user). Guards: you can't delete your own account, and you can't delete the last remaining Owner (§10.1).
+- Follow-up to §9.1's scrolling fix: on any page with a long list next to a short "add/create" side panel
+  (26 views — the Restaurant Menu screen, Expenses, Finance Disbursements, most HR/Inventory list screens),
+  that panel now stays pinned to the top of the content area (and scrolls on its own if it's ever taller
+  than the screen) instead of scrolling away with the list — three independent scroll regions per page:
+  nav, list, and side panel (§10.2).
+
 **Scrolling, auto-numbering, breakfast CRUD, purchase reports, and a financial-linking audit (`CORRECTION_ROUND_34_DELIVERY.md` §9)**
 - Nine separate requests in one round — see §9 for the full write-up; §9.9 is a direct audit of the
   "double records" concern and is worth reading in full if you're reviewing this round's finance changes.

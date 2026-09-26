@@ -73,7 +73,7 @@
         @endforelse
     </div>
 
-    <div class="col-span-1 space-y-4">
+    <div class="col-span-1 space-y-4 hms-side-panel">
         <form method="POST" action="{{ route('pos.menu.categories.store', $outlet) }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             @csrf
             <div class="text-xs font-medium">New category</div>

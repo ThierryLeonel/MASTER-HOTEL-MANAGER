@@ -58,7 +58,7 @@
         </div>
     </div>
 
-    <div class="lg:col-span-1">
+    <div class="lg:col-span-1 hms-side-panel">
         <form method="POST" action="{{ route('companies.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             @csrf
             <div class="text-xs font-medium">Add a company</div>

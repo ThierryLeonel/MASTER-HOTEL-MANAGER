@@ -35,7 +35,7 @@
         @endcan
     </div>
 
-    <div class="col-span-1 space-y-3">
+    <div class="col-span-1 space-y-3 hms-side-panel">
         <div class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             <div class="text-xs font-medium">My attendance today</div>
             @if (! $myToday || ! $myToday->clock_in_at)

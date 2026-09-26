@@ -179,7 +179,7 @@
         @endif
     </div>
 
-    <div class="col-span-1 space-y-3">
+    <div class="col-span-1 space-y-3 hms-side-panel">
         @if (in_array($reservation->status, ['pending', 'approved', 'confirmed']))
             @can('post-folio-payment')
                 <form method="POST" action="{{ route('reservations.deposit', $reservation) }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">

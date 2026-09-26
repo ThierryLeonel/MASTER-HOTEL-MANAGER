@@ -96,6 +96,29 @@
                 overflow-y: auto;
             }
         }
+
+        /*
+            Follow-up to the scrolling fix above: many views (menu editors,
+            expenses, disbursements, employee/HR screens, requisitions, etc.)
+            lay out a long list next to a short "add/create" side panel using
+            a 2/3 + 1/3 grid. Before this, that side panel scrolled away with
+            the list — on a long list you had to scroll all the way back up
+            to reach the "add" form again. `.hms-side-panel` makes that panel
+            stick to the top of the content area and, if the panel's own
+            content is ever taller than the screen, gives it a third,
+            independent scrollbar instead of stretching the page — so a
+            view like this ends up with three scroll regions total: the nav,
+            the list, and the side panel.
+        */
+        @media (min-width: 768px) {
+            .hms-side-panel {
+                position: sticky;
+                top: 1.5rem;
+                align-self: start;
+                max-height: calc(100vh - 3rem);
+                overflow-y: auto;
+            }
+        }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -233,6 +256,9 @@
                 @endcanany
                 @can('manage-financial-accounts')
                     <a href="{{ route('finance.financial-accounts.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.financial-accounts.*') ? 'is-selected' : '' }}">Financial Accounts</a>
+                @endcan
+                @can('void-transactions')
+                    <a href="{{ route('finance.transactions.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.transactions.*') ? 'is-selected' : '' }}">All Transactions</a>
                 @endcan
                 @can('manage-accounts-receivable')
                     <a href="{{ route('finance.accounts-receivable.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.accounts-receivable.*') ? 'is-selected' : '' }}">Client Debt</a>

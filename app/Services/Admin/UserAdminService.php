@@ -161,6 +161,57 @@ class UserAdminService
     }
 
     /**
+     * Direct request ("the owner is suppose to be able to delet user").
+     * User already uses SoftDeletes (same as Guest — see both models), and
+     * 67 separate foreign keys across the schema reference users.id, so
+     * this is deliberately never a hard delete: every shift, folio,
+     * payment, audit log, etc. this account ever touched keeps pointing at
+     * a real row, exactly as before. "Delete" just removes the account
+     * from the active list and blocks login; restore() below reverses it.
+     * Gated on its own 'delete-users' permission (Owner-only — see
+     * RolesAndPermissionsSeeder), separate from 'manage-users', which
+     * still covers create/edit/deactivate/credential-reset.
+     *
+     * Two guards, both throwing HmsException the same way setActive()'s
+     * self-deactivate guard already does: you cannot delete your own
+     * account (you would otherwise instantly lock yourself out with no
+     * one left to undo it), and you cannot delete the last remaining
+     * Owner account (the one role every permission check bypasses via
+     * Gate::before — losing every Owner would leave nobody able to
+     * restore it or run the admin screens that require this permission).
+     */
+    public function delete(User $user, User $actor): void
+    {
+        if ($user->id === $actor->id) {
+            throw new HmsException('You cannot delete your own account.');
+        }
+
+        if ($user->hasRole('owner') && User::role('owner')->where('id', '!=', $user->id)->count() === 0) {
+            throw new HmsException('You cannot delete the only remaining Owner account.');
+        }
+
+        $this->audit->log(
+            'admin.user_deleted',
+            'admin',
+            $user,
+            oldValues: ['name' => $user->name, 'username' => $user->username, 'email' => $user->email, 'role' => $user->getRoleNames()->first()],
+            actor: $actor,
+        );
+
+        $user->delete();
+    }
+
+    public function restore(int $userId, User $actor): User
+    {
+        $user = User::onlyTrashed()->findOrFail($userId);
+        $user->restore();
+
+        $this->audit->log('admin.user_restored', 'admin', $user, actor: $actor);
+
+        return $user->fresh();
+    }
+
+    /**
      * @return array{password:?string,pin_hash:?string}
      */
     private function credentialFields(string $authType, ?string $password, ?string $pin): array

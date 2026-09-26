@@ -193,6 +193,25 @@ class RolesAndPermissionsSeeder extends Seeder
         // at all; a room that has ever had a stay/reservation/etc. can
         // only be deactivated, never erased.
         'edit-room-details',
+        // Direct request ("the owner is suppose to be able to delet
+        // user"): removing a staff account. Deliberately its own
+        // permission, separate from 'manage-users' (which General Manager
+        // also holds, and which still covers create/edit/deactivate/
+        // credential-reset) and Owner-only exactly like
+        // 'manage-system-data'/'edit-room-details' above — excluded from
+        // General Manager's $all grant below. User already uses
+        // SoftDeletes (see the model), so this is reversible, not a true
+        // erase — see UserAdminService::delete()/restore().
+        'delete-users',
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]"): void-then-correct access to the central
+        // `payments` ledger — every payment/refund/expense/disbursement/
+        // payroll payout in the system flows through this one table, so
+        // this one permission covers all of them (see
+        // PaymentLedgerService::void()). Owner-only, same pattern as
+        // 'manage-system-data'/'edit-room-details'/'delete-users' above
+        // — excluded from General Manager's $all grant below.
+        'void-transactions',
     ];
 
     public function run(): void
@@ -242,7 +261,7 @@ class RolesAndPermissionsSeeder extends Seeder
             // that permission's own comment in PERMISSIONS above.
             // 'edit-room-details' is Owner-only on request, same as
             // 'manage-system-data' — see its comment in PERMISSIONS.
-            'general_manager' => array_values(array_diff($all, ['manage-own-shift', 'manage-system-data', 'edit-room-details'])),
+            'general_manager' => array_values(array_diff($all, ['manage-own-shift', 'manage-system-data', 'edit-room-details', 'delete-users', 'void-transactions'])),
             'duty_manager' => [
                 'approve-reservation', 'manage-reservations', 'manage-guests',
                 'view-rooms', 'manage-rooms', 'update-room-status', 'checkin-guest', 'checkout-guest',

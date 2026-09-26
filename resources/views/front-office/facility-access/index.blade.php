@@ -33,7 +33,7 @@
         </div>
     </div>
 
-    <div class="lg:col-span-1 space-y-6">
+    <div class="lg:col-span-1 space-y-6 hms-side-panel">
         <form method="POST" action="{{ route('facility-access.guest') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             @csrf
             <div class="text-xs font-medium">Free access — checked-in guest</div>

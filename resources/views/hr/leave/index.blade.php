@@ -56,7 +56,7 @@
         {{ $requests->links() }}
     </div>
 
-    <div class="col-span-1 space-y-3">
+    <div class="col-span-1 space-y-3 hms-side-panel">
         @can('request-leave')
             <form method="POST" action="{{ route('hr.leave-requests.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                 @csrf

@@ -23,7 +23,7 @@
         {{ $runs->links() }}
     </div>
 
-    <div class="col-span-1">
+    <div class="col-span-1 hms-side-panel">
         @can('manage-payroll')
             <form method="POST" action="{{ route('hr.payroll-runs.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                 @csrf

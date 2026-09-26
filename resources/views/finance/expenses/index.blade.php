@@ -65,7 +65,7 @@
         {{ $expenses->links() }}
     </div>
 
-    <div class="col-span-1">
+    <div class="col-span-1 hms-side-panel">
         @can('manage-expenses')
             <form method="POST" action="{{ route('finance.expenses.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                 @csrf

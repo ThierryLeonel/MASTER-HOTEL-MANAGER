@@ -64,7 +64,7 @@
         </div>
     </div>
 
-    <div class="lg:col-span-1">
+    <div class="lg:col-span-1 hms-side-panel">
         @can('manage-financial-accounts')
             <form method="POST" action="{{ route('finance.financial-accounts.store') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                 @csrf

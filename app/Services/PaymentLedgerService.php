@@ -13,6 +13,7 @@ use App\Services\Finance\AccountingDayService;
 use App\Services\Finance\ShiftGateService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -108,6 +109,18 @@ class PaymentLedgerService
         ?int $departmentId = null,
         ?int $financialAccountId = null,
         ?string $idempotencyKey = null,
+        // Direct request ("all in payment must be attached to an income
+        // source that is to be represented ... in the income statement"):
+        // only ever passed by PaymentController::store() today (the
+        // general-purpose "record a payment" screen) — every other caller
+        // already self-describes via `sourceModule`/`reference`, so this
+        // is null for them, exactly like `notes` often is.
+        ?string $incomeSource = null,
+        // Direct request ("payments can involve discount if granted") —
+        // informational only, never affects `$amount` (the real net cash
+        // received) or any ledger total. See this column's migration.
+        ?float $discountAmount = null,
+        ?string $discountReason = null,
     ): Payment {
         // Correction round (audited defect #32): a caller worried about a
         // retried submission (double-click, network retry on a deposit or
@@ -188,6 +201,9 @@ class PaymentLedgerService
                 'shift_id' => $shiftId,
                 'idempotency_key' => $idempotencyKey,
                 'notes' => $notes,
+                'income_source' => $incomeSource,
+                'discount_amount' => $discountAmount,
+                'discount_reason' => $discountReason,
             ]);
         } catch (QueryException $e) {
             // Correction round (audited defect #32) — closing a genuine
@@ -235,17 +251,75 @@ class PaymentLedgerService
         // are stale.
         $resolvedAccountId = $financialAccountId ?? $this->defaultFinancialAccountId($method);
         if ($resolvedAccountId !== null) {
-            FinancialAccountReconciliation::where('financial_account_id', $resolvedAccountId)
-                ->where('business_date', $payment->business_date)
-                ->where('is_stale', false)
-                ->update([
-                    'is_stale' => true,
-                    'invalidated_at' => now(),
-                    'invalidated_reason' => "Payment #{$payment->payment_number} posted to this account after this reconciliation was recorded.",
-                ]);
+            $this->flagReconciliationStale($resolvedAccountId, $payment->business_date, "Payment #{$payment->payment_number} posted to this account after this reconciliation was recorded.");
         }
 
         return $payment;
+    }
+
+    /**
+     * Direct request ("the owner is suppose to be able to edit all
+     * transaction[s]"): void-then-correct, never an in-place edit — see
+     * this column's migration (2025_02_02_000600_add_void_columns_to_payments_table)
+     * for the full reasoning. The row, its amount, and every other
+     * original field are left completely untouched; only the three void
+     * columns are set. Unlike `FolioTransaction::void()` (which both
+     * marks the original AND posts a separate reversal transaction,
+     * because a folio's balance/AR tracking needs an explicit ledger
+     * entry to move), nothing else needs to be posted here: every
+     * financial total that reads from this table computes itself live by
+     * summing `payments.amount` (account balances, shift/cash/department
+     * reconciliation, the Income Statement, the Payment Summary report —
+     * see this method's own call sites, all updated alongside this
+     * feature to add `whereNull('voided_at')`), so simply marking a row
+     * voided removes it from every one of those sums automatically, with
+     * nothing left to double-post or drift.
+     *
+     * Deliberately does NOT attempt to also revert the state of whatever
+     * business record this payment came from (an Expense back to
+     * 'approved', a closed POS Order reopened, a paid Payslip reverted) —
+     * voiding here corrects the CASH/financial figures; if the underlying
+     * record also needs reopening to be reprocessed, that is each
+     * module's own concern and out of scope for this generic ledger-level
+     * fix. Gated at the route/controller layer on the Owner-only
+     * `void-transactions` permission — this service method itself does
+     * not check permissions, consistent with every other service in this
+     * class.
+     */
+    public function void(Payment $payment, string $reason, User $actor): Payment
+    {
+        return DB::transaction(function () use ($payment, $reason, $actor) {
+            /** @var Payment $locked */
+            $locked = Payment::query()->whereKey($payment->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($locked->isVoided()) {
+                throw new HmsException('This transaction has already been voided.');
+            }
+
+            $locked->update([
+                'voided_at' => now(),
+                'voided_by' => $actor->id,
+                'void_reason' => $reason,
+            ]);
+
+            if ($locked->financial_account_id !== null) {
+                $this->flagReconciliationStale($locked->financial_account_id, $locked->business_date, "Payment #{$locked->payment_number} was voided after this reconciliation was recorded.");
+            }
+
+            return $locked->fresh();
+        });
+    }
+
+    private function flagReconciliationStale(int $financialAccountId, $businessDate, string $reason): void
+    {
+        FinancialAccountReconciliation::where('financial_account_id', $financialAccountId)
+            ->where('business_date', $businessDate)
+            ->where('is_stale', false)
+            ->update([
+                'is_stale' => true,
+                'invalidated_at' => now(),
+                'invalidated_reason' => $reason,
+            ]);
     }
 
     private function resolveDepartmentId(string $sourceModule, ?int $explicit): ?int

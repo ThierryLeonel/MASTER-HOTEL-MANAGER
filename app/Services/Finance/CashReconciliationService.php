@@ -32,10 +32,13 @@ class CashReconciliationService
         $start = $date->copy()->startOfDay();
         $end = $date->copy()->endOfDay();
 
+        // Direct request ("the owner is suppose to be able to edit all
+        // transaction[s]"): a voided payment must not count toward this
+        // whole-hotel cash figure either.
         $in = (float) Payment::where('method', 'cash')->where('direction', 'in')
-            ->whereBetween('recorded_at', [$start, $end])->sum('amount');
+            ->whereNull('voided_at')->whereBetween('recorded_at', [$start, $end])->sum('amount');
         $out = (float) Payment::where('method', 'cash')->where('direction', 'out')
-            ->whereBetween('recorded_at', [$start, $end])->sum('amount');
+            ->whereNull('voided_at')->whereBetween('recorded_at', [$start, $end])->sum('amount');
 
         return round($in - $out, 2);
     }

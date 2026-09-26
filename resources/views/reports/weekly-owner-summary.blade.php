@@ -25,8 +25,8 @@
         <strong>{{ $occupancy['occupancy_rate'] }}% occupancy</strong>
         ({{ $occupancy['room_nights_occupied'] }} of {{ $occupancy['room_nights_available'] }} room-nights sold),
         with an ADR of {{ number_format($occupancy['adr'], 0) }} XAF and RevPAR of {{ number_format($occupancy['revpar'], 0) }} XAF.
-        Total revenue charged to guest folios was <strong>{{ number_format($statement['total_revenue'], 0) }} XAF</strong>,
-        against <strong>{{ number_format($statement['total_expenses'], 0) }} XAF</strong> in expenses requested,
+        Total revenue (guest folio charges plus other recorded income) was <strong>{{ number_format($statement['total_revenue'], 0) }} XAF</strong>,
+        against <strong>{{ number_format($statement['total_expenses'], 0) }} XAF</strong> in expenses,
         for a net operating result of
         <strong class="{{ $statement['net_operating_result'] >= 0 ? 'text-green-700' : 'text-red-600' }}">
             {{ number_format($statement['net_operating_result'], 0) }} XAF

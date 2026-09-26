@@ -66,7 +66,7 @@
         </div>
     </div>
 
-    <div class="lg:col-span-1">
+    <div class="lg:col-span-1 hms-side-panel">
         <div class="rounded-lg bg-white p-4 shadow-sm">
             <div class="text-xs font-medium uppercase tracking-wide text-slate-500 mb-2">Companies owing money</div>
             <ul class="space-y-2 text-sm">

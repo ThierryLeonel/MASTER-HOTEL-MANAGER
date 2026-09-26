@@ -24,6 +24,12 @@ class UserController extends Controller
     {
         $users = User::query()
             ->with('department')
+            // Direct request ("the owner is suppose to be able to delet
+            // user"): User already uses SoftDeletes, same trashed/active
+            // toggle as GuestController::index() — deleted accounts move
+            // to a separate "Removed users" list rather than vanishing
+            // from the admin screen, and can be restored from there.
+            ->when($request->boolean('trashed'), fn ($q) => $q->onlyTrashed())
             ->when($request->search, fn ($q, $search) => $q->where('name', 'like', "%{$search}%")
                 ->orWhere('username', 'like', "%{$search}%")
                 ->orWhere('email', 'like', "%{$search}%"))
@@ -124,5 +130,24 @@ class UserController extends Controller
         $this->service->unlockPin($user, $request->user());
 
         return back()->with('status', "PIN lockout cleared for {$user->name}.");
+    }
+
+    /**
+     * Owner-only (see the 'delete-users' permission on this route in
+     * routes/web.php). Never a hard delete — see UserAdminService::delete().
+     */
+    public function destroy(Request $request, User $user)
+    {
+        $name = $user->name;
+        $this->service->delete($user, $request->user());
+
+        return redirect()->route('admin.users.index')->with('status', "User \"{$name}\" removed. This can be undone from \"Removed users\" by an Owner.");
+    }
+
+    public function restore(Request $request, int $user)
+    {
+        $restored = $this->service->restore($user, $request->user());
+
+        return redirect()->route('admin.users.edit', $restored)->with('status', "User \"{$restored->name}\" restored.");
     }
 }

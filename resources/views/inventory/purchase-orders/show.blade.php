@@ -64,7 +64,7 @@
         @endif
     </div>
 
-    <div class="col-span-1 space-y-3">
+    <div class="col-span-1 space-y-3 hms-side-panel">
         @if ($purchaseOrder->status === 'draft')
             <form method="POST" action="{{ route('inventory.purchase-orders.submit', $purchaseOrder) }}">
                 @csrf
