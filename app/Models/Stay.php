@@ -13,7 +13,7 @@ class Stay extends Model
     use HasFactory;
 
     protected $fillable = [
-        'reservation_id', 'guest_id', 'company_id', 'room_id', 'check_in_at',
+        'reservation_id', 'guest_id', 'company_id', 'room_id', 'group_reference', 'check_in_at',
         'expected_check_out_date', 'actual_check_out_at', 'agreed_rate',
         'status', 'checked_in_by', 'checked_out_by', 'notes',
         'is_complimentary', 'complimentary_reason', 'marked_complimentary_by', 'marked_complimentary_at',
@@ -125,5 +125,33 @@ class Stay extends Model
     public function breakfastEntitlements()
     {
         return $this->hasMany(BreakfastEntitlement::class);
+    }
+
+    /**
+     * True when this stay was created as part of a multi-room walk-in
+     * check-in (CheckInService::checkInWalkInGroup()) rather than on its
+     * own. Mirrors Reservation::isGrouped() — see this table's
+     * group_reference migration for the full reasoning.
+     */
+    public function isGrouped(): bool
+    {
+        return $this->group_reference !== null;
+    }
+
+    /**
+     * Every other room checked in as part of the same multi-room walk-in
+     * submission as this one — never includes this stay itself. Empty for
+     * an ordinary single check-in (group_reference is null), including
+     * every check-in made from a Reservation, which never sets this
+     * column.
+     */
+    public function groupSiblings()
+    {
+        if ($this->group_reference === null) {
+            return static::query()->whereRaw('1 = 0');
+        }
+
+        return static::where('group_reference', $this->group_reference)
+            ->where('id', '!=', $this->id);
     }
 }

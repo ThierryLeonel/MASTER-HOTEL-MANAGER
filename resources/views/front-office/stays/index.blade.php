@@ -9,7 +9,12 @@
         <tbody class="divide-y">
             @forelse ($stays as $stay)
                 <tr>
-                    <td class="p-3">{{ $stay->room->room_number }}</td>
+                    <td class="p-3">
+                        {{ $stay->room->room_number }}
+                        @if ($stay->isGrouped())
+                            <span class="ml-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700" title="Checked in together with other rooms in the same walk-in submission">Grouped</span>
+                        @endif
+                    </td>
                     <td class="p-3">
                         {{ $stay->guest->full_name }}
                         @if ($stay->is_complimentary)

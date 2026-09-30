@@ -147,4 +147,109 @@ class CheckInController extends Controller
 
         return redirect()->route('stays.show', $stay)->with('status', $status);
     }
+
+    /**
+     * Direct request ("i do not see the multibooking in the check in or
+     * reservation"): one walk-in guest/party taking several rooms right
+     * now — the walk-in counterpart of ReservationController::createMulti().
+     * See CheckInService::checkInWalkInGroup()'s docblock for the full
+     * reasoning.
+     */
+    public function walkInMultiForm(Request $request)
+    {
+        $availableRooms = Room::where('status', 'available')->where('is_active', true)->with('category')->get();
+        $prefillGuest = $request->filled('guest_id') ? Guest::find($request->query('guest_id')) : null;
+        $companies = Company::where('is_active', true)->orderBy('name')->get();
+        $eligibleApprovers = User::role(DiscountApprovalService::ELIGIBLE_ROLES)->where('is_active', true)->orderBy('name')->get();
+
+        return view('front-office.checkin.walk-in-multi', compact('availableRooms', 'prefillGuest', 'companies', 'eligibleApprovers'));
+    }
+
+    public function walkInMultiStore(Request $request)
+    {
+        $data = $request->validate([
+            'guest_id' => 'nullable|exists:guests,id',
+            // Same inline-guest-creation reasoning as walkInStore() above —
+            // one guest, shared by every room in this submission.
+            'new_first_name' => 'nullable|string|max:255',
+            'new_last_name' => 'nullable|string|max:255',
+            'new_phone' => 'nullable|string|max:30',
+            'new_email' => 'nullable|email|max:255',
+            'expected_check_out_date' => 'required|date|after:today',
+            'company_id' => 'nullable|exists:companies,id',
+            'rooms' => 'required|array|min:1',
+            // `distinct` guards against the same room being selected twice
+            // in one submission, which lockAndValidateRoom() would
+            // otherwise only catch as a confusing "already occupied"
+            // error on the second row, inside the transaction.
+            'rooms.*.room_id' => 'required|distinct|exists:rooms,id',
+            'rooms.*.agreed_rate' => 'required|numeric|min:0',
+            'rooms.*.discount_approver_id' => 'nullable|exists:users,id',
+            'rooms.*.discount_reason' => 'nullable|string|max:500',
+        ]);
+
+        if (empty($data['guest_id']) && empty($data['new_first_name'])) {
+            throw ValidationException::withMessages([
+                'new_first_name' => 'Search for an existing guest above, or type a name to check in a new guest.',
+            ]);
+        }
+
+        $actorIsEligible = DiscountApprovalService::isEligibleApprover($request->user());
+        $roomsById = Room::with('category')->whereIn('id', collect($data['rooms'])->pluck('room_id'))->get()->keyBy('id');
+
+        // Same fail-fast, field-specific discount-approval check as
+        // walkInStore()'s single-room version above, run per room here so
+        // a receptionist sees exactly which row needs an approver rather
+        // than a single generic error for the whole submission.
+        foreach ($data['rooms'] as $index => $roomInput) {
+            $room = $roomsById->get($roomInput['room_id']);
+            if (! $room) {
+                continue;
+            }
+
+            $needsDiscountApproval = bccomp((string) $roomInput['agreed_rate'], (string) $room->category->base_rate, 2) < 0;
+
+            if ($needsDiscountApproval && ! $actorIsEligible && empty($roomInput['discount_approver_id'])) {
+                throw ValidationException::withMessages([
+                    "rooms.{$index}.discount_approver_id" => "Room {$room->room_number}: the agreed rate is below the standard rate ({$room->category->base_rate} XAF) for {$room->category->name}. Select who approved this discount to proceed — they'll confirm it themselves afterward.",
+                ]);
+            }
+
+            if (! empty($roomInput['discount_approver_id']) && empty($roomInput['discount_reason'])) {
+                throw ValidationException::withMessages([
+                    "rooms.{$index}.discount_reason" => "Room {$room->room_number}: a reason is required when routing a discount for approval.",
+                ]);
+            }
+        }
+
+        $guest = ! empty($data['guest_id'])
+            ? Guest::findOrFail($data['guest_id'])
+            : Guest::create([
+                'first_name' => $data['new_first_name'],
+                'last_name' => $data['new_last_name'] ?? '',
+                'phone' => $data['new_phone'] ?? null,
+                'email' => $data['new_email'] ?? null,
+                'created_by' => $request->user()->id,
+            ]);
+
+        $stays = $this->service->checkInWalkInGroup(
+            $guest,
+            array_map(fn (array $room) => [
+                'room_id' => (int) $room['room_id'],
+                'agreed_rate' => (float) $room['agreed_rate'],
+                'discount_approver_id' => ! empty($room['discount_approver_id']) ? (int) $room['discount_approver_id'] : null,
+                'discount_reason' => $room['discount_reason'] ?? null,
+            ], $data['rooms']),
+            new \DateTime($data['expected_check_out_date']),
+            $request->user(),
+            $data['company_id'] ?? null,
+        );
+
+        $pendingCount = $stays->filter(fn ($stay) => $stay->discountApprovals()->where('status', 'pending')->exists())->count();
+
+        $status = $stays->count().' rooms checked in together.'
+            .($pendingCount ? " {$pendingCount} of them have a discounted rate pending approval." : '');
+
+        return redirect()->route('stays.show', $stays->first())->with('status', $status);
+    }
 }

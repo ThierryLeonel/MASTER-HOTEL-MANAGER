@@ -153,10 +153,11 @@ class CheckInService
         ?int $companyId = null,
         ?int $discountApproverId = null,
         ?string $discountReason = null,
+        ?string $groupReference = null,
     ): Stay {
         $this->shiftGate->assertOpenForCode('FO');
 
-        return DB::transaction(function () use ($guest, $roomId, $expectedCheckOut, $agreedRate, $actor, $companyId, $discountApproverId, $discountReason) {
+        return DB::transaction(function () use ($guest, $roomId, $expectedCheckOut, $agreedRate, $actor, $companyId, $discountApproverId, $discountReason, $groupReference) {
             $room = $this->lockAndValidateRoom($roomId);
 
             $stay = Stay::create([
@@ -164,6 +165,12 @@ class CheckInService
                 'guest_id' => $guest->id,
                 'company_id' => $companyId,
                 'room_id' => $room->id,
+                // Direct request ("i do not see the multibooking in the
+                // check in"): null for every ordinary single-room walk-in
+                // — only checkInWalkInGroup() below ever passes a value,
+                // exactly like ReservationService::create()'s own
+                // group_reference parameter.
+                'group_reference' => $groupReference,
                 'check_in_at' => now(),
                 'expected_check_out_date' => $expectedCheckOut,
                 'agreed_rate' => $agreedRate,
@@ -212,6 +219,76 @@ class CheckInService
 
             return $stay;
         });
+    }
+
+    /**
+     * Direct request ("i do not see the multibooking in the check in or
+     * reservation"): one walk-in guest/party taking several rooms right
+     * now, in a single submission — the walk-in equivalent of
+     * ReservationService::createGroup(). Deliberately reuses
+     * checkInWalkIn() once per room, wrapped in one outer transaction,
+     * for the exact same reason createGroup() reuses create(): every
+     * existing rule for a single walk-in (room availability/maintenance
+     * locking, the open-shift gate, per-room discount-approval routing,
+     * folio creation, the initial lodging charge) applies identically to
+     * each room, and the only new behavior is the shared group_reference
+     * stamped on all of them plus the all-or-nothing wrapping — if any
+     * one room in this submission fails (already occupied, a blocked
+     * discount, an invalid room id), none of the rooms are checked in,
+     * rather than leaving part of the party checked in and part not.
+     *
+     * One real guest — existing or newly created — is shared across every
+     * room, exactly like the reservation flow shares one guest_id across
+     * the group; a genuinely different guest is a separate check-in, not
+     * part of this party. Company billing and expected check-out date are
+     * likewise shared (one party, one stay period), while each room keeps
+     * its own agreed rate and, when it's a discount, its own approver/
+     * reason — a family might take one Deluxe room at the standard rate
+     * and two Standard rooms at a negotiated one.
+     *
+     * @param  array<int, array{room_id:int, agreed_rate:float, discount_approver_id?:int|null, discount_reason?:string|null}>  $rooms
+     * @return \Illuminate\Support\Collection<int, Stay>
+     */
+    public function checkInWalkInGroup(
+        Guest $guest,
+        array $rooms,
+        \DateTimeInterface $expectedCheckOut,
+        User $actor,
+        ?int $companyId = null,
+    ): \Illuminate\Support\Collection {
+        if (count($rooms) < 1) {
+            throw new HmsException('At least one room is required to check in a walk-in party.');
+        }
+
+        return DB::transaction(function () use ($guest, $rooms, $expectedCheckOut, $actor, $companyId) {
+            $groupReference = $this->generateGroupReference();
+
+            return collect($rooms)->map(function (array $room) use ($guest, $expectedCheckOut, $actor, $companyId, $groupReference) {
+                return $this->checkInWalkIn(
+                    $guest,
+                    $room['room_id'],
+                    $expectedCheckOut,
+                    $room['agreed_rate'],
+                    $actor,
+                    $companyId,
+                    $room['discount_approver_id'] ?? null,
+                    $room['discount_reason'] ?? null,
+                    $groupReference,
+                );
+            });
+        });
+    }
+
+    /**
+     * A short, human-showable tag linking every room in one multi-room
+     * walk-in check-in — deliberately distinct from Reservation's own
+     * "GRP-" group_reference (a different table, and a walk-in group is
+     * never a reservation) so staff can tell the two apart if either ever
+     * shows up in the same list or export.
+     */
+    private function generateGroupReference(): string
+    {
+        return 'WGRP-'.now()->format('Ymd').'-'.strtoupper(Str::random(5));
     }
 
     private function lockAndValidateRoom(int $roomId): Room

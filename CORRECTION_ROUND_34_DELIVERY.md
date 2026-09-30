@@ -2186,3 +2186,114 @@ existed before this round and reads fine for every system type and any admin typ
 `ChargeTypeService::generateCode()`) would show up verbatim in a report if the type's name were ever unusual
 enough to collide and need one appended. Not a functional defect — a future round could resolve these
 report labels from the charge type's actual `name` instead of its `code` for full polish.
+
+## 27. Multi-room Walk-in Check-in, and a no-SSH way to catch up a live database's departments
+
+**Reported** (verbatim): "i do not see the multibooking in the check in or reservation also selecting the
+the department doing the payment to the accountantis still fixed an scrollin the toggle meu by the side
+always reload on selecting a particular menu."
+
+This round investigated all three complaints. Two of them — the department dropdown on the payment screen,
+and the sidebar no longer scrolling back to the top — were re-read line by line in
+`front-office/payments/index.blade.php`, `PaymentController`, `PaymentLedgerService::resolveDepartmentId()`,
+and `layouts/app.blade.php`'s scroll-restore script, and all four are structurally correct: the dropdown, the
+"handed over by" textbox (§24), the server-side validation, and the scroll-memory script all already exist
+and already work exactly as designed. The most likely explanation for both still appearing broken on the
+live site is a deployment/seeding gap rather than a code bug — see §27.1 below for the concrete fix and what
+to check. The third complaint was a genuine, confirmed gap: **multi-room booking never existed on Walk-in
+Check-in** — only the advance-Reservation flow (§25) ever got it. §27.2 below adds it.
+
+### 27.1 New Deploy Helper button: "Update departments & charge-type assignments"
+
+**Root cause theory**: Laravel Cloud auto-runs `php artisan migrate` on every deploy, but does **not**
+auto-run seeders. `DepartmentSeeder` — which creates any department added after a hotel's initial go-live
+(Bar Outside, Bucareaux) and backfills `charge_types.department_id` for the built-in types — was never
+re-run on the live database after those departments/charge types were introduced. That would make the
+department dropdown look "stuck": genuinely missing options, not a broken control.
+
+**Fix**: a new, always-safe, individually re-runnable button — "2d. Update departments & charge-type
+assignments" — added to the existing no-SSH `/deploy-helper` tool (`DeployHelperController::
+seedDepartments()`), mirroring the exact pattern already proven safe by "2b. Update roles & permissions" and
+"2c. Set up the four starter financial accounts": it is exempt from the generic seeder's "refuse once real
+users exist" guard, since re-running `DepartmentSeeder` is provably harmless on a live hotel —
+`firstOrCreate()` for every department (never duplicates one that already exists), and the charge-type
+backfill loop only ever fills in a `department_id` that is currently `NULL` (never overwrites an admin's own
+deliberate reassignment from the Charge Types screen). **Action needed on your end**: open
+`https://your-domain/deploy-helper?token=YOUR_DEPLOY_TOKEN` on the live site and click this new button once.
+If the department dropdown is still missing options after that, the code itself needs a second look — but
+this is the first thing to rule out.
+
+For the sidebar scroll: please double check that the zip from the previous round (the one containing §23's
+fix) was actually pushed to your GitHub repo and that Laravel Cloud's most recent deploy succeeded — a config
+cache left over from an older deploy is the other common cause of a fix looking like it "didn't take." "3.
+Clear cached config/routes/views" on the same Deploy Helper page is safe to click any time and rules that
+out.
+
+### 27.2 Multi-room Walk-in Check-in
+
+**Fix**: a new "+ Check in Multiple Rooms" link on the Walk-in Check-in screen opens a second form — one
+guest/party, one shared expected check-out date, and as many repeatable room rows as needed (same "add
+another room" pattern already used on the Reservations multi-room form, §25) — and checks every room in
+together in a single submission via a new `CheckInService::checkInWalkInGroup()`, the walk-in counterpart of
+`ReservationService::createGroup()`.
+
+Each room still gets its own independent `Stay` and `Folio`, created exactly the way a single walk-in
+check-in always has (room availability/maintenance locking, the open-shift gate, the initial lodging charge)
+— `checkInWalkInGroup()` deliberately reuses `checkInWalkIn()` once per room rather than duplicating its
+logic, so every existing rule applies identically to each one. The only new behavior is a shared
+`group_reference` (new nullable, indexed column on `stays`, mirroring the one already on `reservations`)
+stamped on every room from the same submission, and the whole batch wrapped in one all-or-nothing
+transaction: if any single room in the submission fails — already occupied, an unauthorized discount, an
+invalid room — **none** of the rooms are checked in, rather than leaving part of a party checked in and part
+not.
+
+A family taking one Deluxe room and two Standard rooms can still negotiate a different rate per room: each
+room row has its own agreed rate, and if a given room's rate is a discount below its own standard rate, that
+row (and only that row) shows the same "who approved this discount" picker the single walk-in form already
+has (§6/Feature 6's walk-in exception) — a discount on one room never requires or affects an approval on any
+other room in the same party. The guest (existing, searched, or created inline exactly like the single form
+already does), the expected check-out date, and the optional billing company are shared across the whole
+party, same as the reservation-side multi-room form shares guest/dates/notes.
+
+Every room checked in together shows a "Part of a multi-room check-in (N rooms total)" box on its own Stay
+page, linking to every sibling room — mirroring the identical box the multi-room Reservation page (§25)
+already has — and a small "Grouped" badge on the Active Stays list, exactly like reservations' own list
+already shows. `Stay::isGrouped()`/`groupSiblings()` mirror `Reservation`'s own methods of the same name.
+
+An ordinary single-room walk-in (the Walk-in Check-in screen most staff will keep using most of the time) is
+completely unaffected — it keeps writing `group_reference = null`, exactly as before this round, and none of
+its behavior changed.
+
+### 27.3 Testing disclosure
+
+New test file: `tests/Feature/FrontOffice/WalkInGroupCheckInTest.php` — checking in two rooms together
+shares one `group_reference` and creates two independent active Stays/Folios; a new guest typed inline is
+shared correctly across every room; the whole submission is all-or-nothing when one room turns out to
+already be occupied (verified against a real `Stay` row, not the room's own mutable `status` column, the
+same distinction `lockAndValidateRoom()`'s own docblock already documents); selecting the same room twice in
+one submission is rejected before anything is created; a per-room discount routes to its own named approver
+without affecting the other, full-rate room in the same party; a discounted room with no eligible approver
+named is blocked with a field-specific error naming that exact room row; the Stay page shows every sibling
+room; and a regression test confirming an ordinary single-room walk-in still never gets a `group_reference`.
+Two new tests also added to `tests/Feature/DeployHelperTest.php` for the new "seed-departments" button: it is
+never refused even with existing users (and actually creates the newer departments / backfills the charge-type
+department assignment), and it never overwrites a department an admin already deliberately reassigned from
+the Charge Types screen — plus the existing "safe seeders are a 404 without the flag/token" test was extended
+to cover this third route.
+
+`php -l` clean on every touched/new PHP file this round (`DeployHelperController.php`, `routes/deploy.php`,
+`DeployHelperTest.php`, the new stays `group_reference` migration, `Stay.php`, `CheckInService.php`,
+`CheckInController.php`, `StayController.php`, `routes/web.php`, `WalkInGroupCheckInTest.php`) — run both
+individually and as a full project-wide sweep (`app/`, `database/`, `routes/`, `tests/`), with zero output
+either way. Blade directive/tag balance verified on every touched/new view
+(`deploy-helper/index.blade.php`, `checkin/walk-in.blade.php`, the new `checkin/walk-in-multi.blade.php`,
+`front-office/stays/show.blade.php`, `front-office/stays/index.blade.php`) plus a full sweep of every
+`.blade.php` file in the project — the only mismatches reported anywhere are the same pre-existing false
+positives already disclosed in earlier rounds (a single-argument `@section('title', ...)` never needing
+`@endsection`, and one `@canany` sitting inside a Blade comment in `layouts/app.blade.php`), confirmed
+unchanged in count from before this round. Same standing limitation as every round: no `vendor/` in this
+sandbox, so none of this — including the new migration and the new Deploy Helper button — was actually
+executed against a real database or clicked through in a browser. Given this round touches check-in (a
+financially load-bearing flow), a real click-through of both the single and multi-room Walk-in Check-in
+forms, and a real run of `php artisan migrate` plus the new test suite, matters more than usual before
+treating this as verified.

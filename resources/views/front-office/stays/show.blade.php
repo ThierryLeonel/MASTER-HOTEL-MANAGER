@@ -31,6 +31,30 @@
             </div>
         </div>
 
+        @if ($stay->isGrouped())
+            {{--
+                Direct request ("i do not see the multibooking in the
+                check in"): every other room from the same multi-room
+                walk-in check-in, so staff can jump between the whole
+                party's rooms from any one of them — mirrors
+                reservations/show.blade.php's own group-siblings block.
+                Each sibling is still its own independent Stay/Folio; this
+                is purely a navigation aid.
+            --}}
+            <div class="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
+                <p class="font-medium text-blue-800">Part of a multi-room check-in ({{ $groupSiblings->count() + 1 }} rooms total)</p>
+                <ul class="mt-1 space-y-1">
+                    @foreach ($groupSiblings as $sibling)
+                        <li>
+                            <a href="{{ route('stays.show', $sibling) }}" class="text-blue-700 hover:underline">Room {{ $sibling->room->room_number }}</a>
+                            — {{ $sibling->guest->full_name }}
+                            <span class="rounded bg-white px-1.5 py-0.5 text-xs">{{ $sibling->status }}</span>
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+
         @php
             // Feature request ("a place ... to identify who approved the
             // discount"): the walk-in exception lets check-in proceed

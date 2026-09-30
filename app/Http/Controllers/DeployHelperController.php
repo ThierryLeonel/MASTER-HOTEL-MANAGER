@@ -238,6 +238,50 @@ class DeployHelperController extends Controller
         ]);
     }
 
+    /**
+     * Same reasoning as seedRolesAndPermissions()/seedFinancialAccounts()
+     * above, for the seeder this round's charge-types unification and
+     * revenue-recognition work both depend on:
+     * `DepartmentSeeder::CHARGE_TYPE_DEPARTMENTS` backfills which
+     * department each system charge type belongs to
+     * (bar_charge -> Bar, etc.), and the seeder also creates any
+     * department row (Bar Outside, Bucareaux, ...) added in a later round
+     * than whenever this hotel's database was first seeded. Without this
+     * button, on a host with no SSH, an already-live hotel had no safe
+     * way to pick up either of those — the department dropdown on the
+     * "record a payment" screen would stay missing whichever department
+     * rows were added after go-live, and manually-recorded outlet revenue
+     * (FinancialReportService::manuallyRecognizedOutletRevenue()) would
+     * never fold in correctly.
+     *
+     * `DepartmentSeeder` is always safe to re-run, at any time, on a
+     * database with any amount of real data: departments are created via
+     * `firstOrCreate()` (never duplicated), and the charge-type backfill
+     * only ever touches a charge type that still has a NULL
+     * `department_id` (see `DepartmentSeeder::run()`'s own comment) — a
+     * department already correctly assigned, or deliberately left
+     * unassigned by an admin from the Charge Types screen, is never
+     * overwritten.
+     */
+    public function seedDepartments(Request $request)
+    {
+        $this->authorizeRequest($request);
+
+        Artisan::call('db:seed', ['--class' => \Database\Seeders\DepartmentSeeder::class, '--force' => true]);
+        $output = Artisan::output();
+
+        $this->logAction('deploy.departments_seed_ran', $request);
+
+        $disabled = $request->boolean('disable_after') ? $this->disableHelper() : null;
+
+        return view('deploy-helper.result', [
+            'token' => $request->input('token'),
+            'heading' => 'Departments updated',
+            'output' => $output,
+            'disabled' => $disabled,
+        ]);
+    }
+
     public function clearCaches(Request $request)
     {
         $this->authorizeRequest($request);

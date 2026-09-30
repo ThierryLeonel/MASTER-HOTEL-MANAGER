@@ -578,6 +578,18 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Multi-room Walk-in Check-in, and a Deploy Helper button to catch up departments on a live database (`CORRECTION_ROUND_34_DELIVERY.md` §27)**
+- A walk-in party taking several rooms can now be checked in together in one submission — "+ Check in
+  Multiple Rooms" on the Walk-in Check-in screen — the same way multi-room advance Reservations already
+  worked (§25). One guest, one shared expected check-out date, as many rooms as needed, each with its own
+  rate and (if discounted) its own approver. Every room still gets its own independent Stay/Folio; the
+  Active Stays list and each stay's page now show which rooms were checked in together.
+- New "2d. Update departments & charge-type assignments" button on `/deploy-helper` — always safe to click,
+  any number of times, on a live hotel. Laravel Cloud auto-migrates on deploy but does not auto-seed, so a
+  department (or a charge type's department assignment) added in a later round than go-live can silently
+  never reach the live database; this button re-runs just that seeder with no SSH needed. Use it if the
+  "sales handed over by" department dropdown on the Payments screen is missing an outlet.
+
 **Charge types unified into one editable list — bar, restaurant, front desk, rental, Gym, Pool, and anything you add (`CORRECTION_ROUND_34_DELIVERY.md` §26)**
 - Direct request: "normally we have bar charge, restaurant charge, frontdesk charge, rental charge, pool
   fee, Gym Fee, etc include all connect them and charges can be posted and payment can be recieved and

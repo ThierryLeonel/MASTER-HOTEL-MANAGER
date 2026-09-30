@@ -182,10 +182,51 @@ class DeployHelperTest extends TestCase
         $this->assertSame('50000.00', \App\Models\FinancialAccount::where('code', 'CASH')->first()->opening_balance);
     }
 
-    public function test_these_two_safe_seeders_are_still_a_404_without_the_flag_and_token(): void
+    /**
+     * Charge-types unification round: same idempotency/no-SSH reasoning
+     * as the two seeders above — see DeployHelperController::
+     * seedDepartments()'s docblock. Proves both halves of what an
+     * already-live hotel needs this for: a department row added in a
+     * later round than go-live, and a system charge type's department
+     * backfilled.
+     */
+    public function test_seeding_departments_alone_is_never_refused_even_with_an_existing_user(): void
+    {
+        $this->enable();
+        User::factory()->create();
+
+        $response = $this->post(route('deploy-helper.seed-departments'), ['token' => self::TOKEN]);
+
+        $response->assertOk();
+        $response->assertSee('Departments updated');
+        $this->assertDatabaseHas('departments', ['code' => 'BAROUT']);
+        $this->assertDatabaseHas('departments', ['code' => 'BUCA']);
+        $this->assertSame(
+            \App\Models\Department::where('code', 'BAR')->value('id'),
+            \App\Models\ChargeType::where('code', 'bar_charge')->value('department_id'),
+        );
+    }
+
+    public function test_seeding_departments_never_overwrites_a_charge_types_department_already_set_by_an_admin(): void
+    {
+        $this->enable();
+        // An admin deliberately reassigned bar_charge to a different
+        // department from the Charge Types screen — re-running this
+        // seeder must never silently revert that choice.
+        $this->post(route('deploy-helper.seed'), ['token' => self::TOKEN]);
+        $finance = \App\Models\Department::where('code', 'FIN')->first();
+        \App\Models\ChargeType::where('code', 'bar_charge')->update(['department_id' => $finance->id]);
+
+        $this->post(route('deploy-helper.seed-departments'), ['token' => self::TOKEN]);
+
+        $this->assertSame($finance->id, \App\Models\ChargeType::where('code', 'bar_charge')->value('department_id'));
+    }
+
+    public function test_these_three_safe_seeders_are_still_a_404_without_the_flag_and_token(): void
     {
         $this->post(route('deploy-helper.seed-roles-and-permissions'), ['token' => 'wrong'])->assertNotFound();
         $this->post(route('deploy-helper.seed-financial-accounts'), ['token' => 'wrong'])->assertNotFound();
+        $this->post(route('deploy-helper.seed-departments'), ['token' => 'wrong'])->assertNotFound();
     }
 
     public function test_clear_caches_runs_the_fixed_safe_command_list(): void

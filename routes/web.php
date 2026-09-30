@@ -229,6 +229,12 @@ Route::middleware('auth')->group(function () {
         Route::post('/reservations/{reservation}/check-in', [CheckInController::class, 'fromReservation'])->name('reservations.checkin');
         Route::get('/walk-in', [CheckInController::class, 'walkInForm'])->name('checkin.walk-in');
         Route::post('/walk-in', [CheckInController::class, 'walkInStore'])->name('checkin.walk-in.store');
+        // Direct request ("i do not see the multibooking in the check in
+        // or reservation"): the walk-in counterpart of
+        // reservations.create-multi/store-multi — see
+        // CheckInService::checkInWalkInGroup()'s docblock.
+        Route::get('/walk-in/multi', [CheckInController::class, 'walkInMultiForm'])->name('checkin.walk-in.multi');
+        Route::post('/walk-in/multi', [CheckInController::class, 'walkInMultiStore'])->name('checkin.walk-in.multi.store');
     });
 
     // Phase 9.0 security fix: index()/show() were previously reachable by

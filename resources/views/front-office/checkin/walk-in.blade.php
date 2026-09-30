@@ -1,6 +1,11 @@
 @extends('layouts.app')
 @section('title', 'Walk-in Check-in')
 @section('content')
+
+<div class="mb-4 max-w-xl flex justify-end">
+    <a href="{{ route('checkin.walk-in.multi') }}" class="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">+ Check in Multiple Rooms</a>
+</div>
+
 <form method="POST" action="{{ route('checkin.walk-in.store') }}" class="max-w-xl space-y-4 rounded-lg bg-white p-6 shadow-sm">
     @csrf
     <input type="hidden" name="guest_id" id="guest_id" value="{{ $prefillGuest->id ?? '' }}">

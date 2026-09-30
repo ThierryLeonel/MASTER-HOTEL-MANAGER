@@ -38,6 +38,11 @@ Route::middleware('throttle:10,1')->prefix('deploy-helper')->name('deploy-helper
     // why a no-SSH host specifically needed these.
     Route::post('/seed-roles-and-permissions', [DeployHelperController::class, 'seedRolesAndPermissions'])->name('seed-roles-and-permissions');
     Route::post('/seed-financial-accounts', [DeployHelperController::class, 'seedFinancialAccounts'])->name('seed-financial-accounts');
+    // Charge-types unification round: see DeployHelperController::
+    // seedDepartments()'s docblock — backfills new departments (Bar
+    // Outside, Bucareaux, ...) and each system charge type's department
+    // on an already-live hotel with no SSH access.
+    Route::post('/seed-departments', [DeployHelperController::class, 'seedDepartments'])->name('seed-departments');
     Route::post('/clear-caches', [DeployHelperController::class, 'clearCaches'])->name('clear-caches');
     // New requirement 7 ("hotel logo fix + browser favicon"): the
     // diagnosed root cause of "the hotel logo doesn't show up" — see

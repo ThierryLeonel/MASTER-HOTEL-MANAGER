@@ -49,7 +49,15 @@ class StayController extends Controller
             ->orderBy('name')
             ->get();
 
-        return view('front-office.stays.show', compact('stay', 'financialAccounts', 'postableChargeTypes'));
+        // Direct request ("i do not see the multibooking in the check
+        // in"): every other room from the same multi-room walk-in
+        // check-in (CheckInService::checkInWalkInGroup()) — mirrors
+        // ReservationController::show()'s own $groupSiblings.
+        $groupSiblings = $stay->isGrouped()
+            ? $stay->groupSiblings()->with(['guest', 'room'])->orderBy('id')->get()
+            : collect();
+
+        return view('front-office.stays.show', compact('stay', 'financialAccounts', 'postableChargeTypes', 'groupSiblings'));
     }
 
     /**

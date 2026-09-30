@@ -79,6 +79,15 @@
             </form>
         </div>
 
+        <div class="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm space-y-3">
+            <div class="font-medium text-sm">2d. Update departments &amp; charge-type assignments</div>
+            <p class="text-xs text-slate-600">Runs just the departments seeder — always safe to click, any number of times, even on a live hotel. Creates any department (e.g. Bar Outside, Bucareaux) added in a round after this hotel first went live, and assigns each built-in charge type (room, bar, restaurant, front desk, ...) to its department for reporting. Never touches or duplicates an existing department, and never overwrites a charge type's department once it's already set. Use this if the "sales handed over by" department dropdown on the Payments screen is missing an outlet, or a manually recorded outlet payment isn't showing up as that outlet's revenue in the reports.</p>
+            <form method="POST" action="{{ route('deploy-helper.seed-departments') }}" class="space-y-2">
+                <input type="hidden" name="token" value="{{ $token }}">
+                <button class="rounded bg-blue-700 px-3 py-1.5 text-sm text-white hover:bg-blue-600">Update departments</button>
+            </form>
+        </div>
+
         <div class="rounded-lg bg-white p-4 shadow-sm space-y-3">
             <div class="font-medium text-sm">3. Clear cached config/routes/views</div>
             <p class="text-xs text-slate-500">Runs <code>config:clear</code>, <code>cache:clear</code>, <code>route:clear</code>, <code>view:clear</code> — useful if a previous deploy left a stale cache. Never destructive to your data.</p>
