@@ -12,7 +12,14 @@ class Reservation extends Model
     use HasFactory;
 
     protected $fillable = [
-        'reservation_number', 'guest_id', 'room_category_id', 'room_id',
+        'reservation_number',
+        // Direct request ("i want to be able to book multi reservations
+        // and multi bookings instead of entering 1 by 1") — shared by
+        // every reservation created together in one multi-room booking;
+        // null for an ordinary single reservation. See this column's
+        // migration and ReservationService::createGroup().
+        'group_reference',
+        'guest_id', 'room_category_id', 'room_id',
         'check_in_date', 'check_out_date', 'adults', 'children', 'status', 'source',
         'rate_quoted', 'deposit_required', 'deposit_paid', 'requested_by',
         'deposit_proof_path', 'deposit_claimed_amount', 'deposit_reference', 'deposit_claimed_method',
@@ -114,5 +121,29 @@ class Reservation extends Model
     public function nights(): int
     {
         return max(1, $this->check_in_date->diffInDays($this->check_out_date));
+    }
+
+    /**
+     * True when this reservation was created as part of a multi-room
+     * booking (ReservationService::createGroup()) rather than on its own.
+     */
+    public function isGrouped(): bool
+    {
+        return $this->group_reference !== null;
+    }
+
+    /**
+     * Every other room booked in the same multi-room submission as this
+     * one — never includes this reservation itself. Empty for an
+     * ordinary single reservation (group_reference is null).
+     */
+    public function groupSiblings()
+    {
+        if ($this->group_reference === null) {
+            return static::query()->whereRaw('1 = 0');
+        }
+
+        return static::where('group_reference', $this->group_reference)
+            ->where('id', '!=', $this->id);
     }
 }

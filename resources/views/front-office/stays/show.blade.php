@@ -118,14 +118,17 @@
                 <form method="POST" action="{{ route('folios.charge', $stay->folio) }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
                     @csrf
                     <div class="text-xs font-medium">Post charge</div>
+                    {{-- Charge-types unification (Sept 2026): reads the live,
+                         admin-editable charge types list (Finance > Charge
+                         Types) instead of a hardcoded option list, so a
+                         newly added type shows up here automatically. --}}
                     <select name="type" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
-                        <option value="room_charge" @disabled($stay->is_complimentary)>Room charge @if ($stay->is_complimentary) (waived — stay is complimentary) @endif</option>
-                        <option value="bar_charge">Bar charge</option>
-                        <option value="restaurant_charge">Restaurant charge</option>
-                        <option value="front_desk_charge">Front desk charge</option>
-                        <option value="bar_outside_charge">Bar Outside charge</option>
-                        <option value="bucareaux_charge">Bucareaux charge</option>
-                        <option value="other_service">Other service</option>
+                        @foreach ($postableChargeTypes as $chargeType)
+                            <option value="{{ $chargeType->code }}" @disabled($chargeType->code === 'room_charge' && $stay->is_complimentary)>
+                                {{ $chargeType->name }}
+                                @if ($chargeType->code === 'room_charge' && $stay->is_complimentary) (waived — stay is complimentary) @endif
+                            </option>
+                        @endforeach
                     </select>
                     <input name="description" placeholder="Description" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
                     <input type="number" step="0.01" name="amount" placeholder="Amount (XAF)" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">

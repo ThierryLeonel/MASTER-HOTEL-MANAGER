@@ -355,6 +355,98 @@ class FinancialReportTest extends TestCase
         $this->assertSame(20000.0, $otherIncome['by_source']['Rent']);
     }
 
+    /**
+     * Charge-types unification (Sept 2026): the old fixed BAR/REST-only
+     * map is now a live read of `charge_types.department_id`, so this
+     * mechanism generalizes to Bar Outside and Bucareaux too — see
+     * FinancialReportService::manuallyRecognizedOutletRevenue()'s own
+     * docblock for the "closing the exact other-income limitation"
+     * reasoning.
+     */
+    public function test_a_general_payment_attributed_to_bar_outside_is_recognised_under_its_own_charge_type(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $this->seed(\Database\Seeders\DepartmentSeeder::class);
+        $barOutside = \App\Models\Department::where('code', 'BAROUT')->first();
+
+        app(PaymentLedgerService::class)->record(
+            amount: 9000,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'BAR OUTSIDE',
+            departmentId: $barOutside->id,
+        );
+
+        $report = app(FinancialReportService::class)->revenueByChargeType(Carbon::today(), Carbon::today());
+
+        $this->assertSame(9000.0, $report['by_type']['bar_outside_charge']);
+    }
+
+    /**
+     * A brand-new, admin-added charge type (not one of the original seven)
+     * that an admin attaches to a department must be recognised here too,
+     * with no further code changes — the whole point of reading this
+     * mapping live from `charge_types` instead of a hardcoded list.
+     */
+    public function test_a_payment_attributed_to_a_department_on_a_brand_new_charge_type_is_recognised(): void
+    {
+        $owner = $this->userWithRole('owner', ['auth_type' => 'password_only']);
+        $accountant = $this->userWithRole('accountant');
+        $this->seed(\Database\Seeders\DepartmentSeeder::class);
+        $bar = \App\Models\Department::where('code', 'BAR')->first();
+
+        $chargeType = app(\App\Services\Finance\ChargeTypeService::class)->create([
+            'name' => 'Karaoke Night',
+            'department_id' => $bar->id,
+        ], $owner);
+
+        app(PaymentLedgerService::class)->record(
+            amount: 4000,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'Karaoke handover',
+            departmentId: $bar->id,
+        );
+
+        $report = app(FinancialReportService::class)->revenueByChargeType(Carbon::today(), Carbon::today());
+
+        $this->assertSame(4000.0, $report['by_type'][$chargeType->code]);
+    }
+
+    /**
+     * Front Office is deliberately excluded from this recognition
+     * mechanism (it always has its own terminal and posts its own
+     * charges directly) — see manuallyRecognizedOutletRevenue()'s own
+     * docblock. A payment ever attributed to it falls under "other
+     * income," unchanged.
+     */
+    public function test_a_payment_attributed_to_front_office_is_not_folded_into_any_charge_type(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $this->seed(\Database\Seeders\DepartmentSeeder::class);
+        $fo = \App\Models\Department::where('code', 'FO')->first();
+
+        app(PaymentLedgerService::class)->record(
+            amount: 6000,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'Front desk handover',
+            departmentId: $fo->id,
+        );
+
+        $report = app(FinancialReportService::class)->revenueByChargeType(Carbon::today(), Carbon::today());
+        $otherIncome = app(FinancialReportService::class)->otherIncomeBySource(Carbon::today(), Carbon::today());
+
+        $this->assertSame(0.0, $report['total']);
+        $this->assertSame(6000.0, $otherIncome['by_source']['Front desk handover']);
+    }
+
     public function test_duty_manager_cannot_view_the_income_statement(): void
     {
         $dutyManager = $this->userWithRole('duty_manager');

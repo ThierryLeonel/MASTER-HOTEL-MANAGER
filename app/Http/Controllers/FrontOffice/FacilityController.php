@@ -12,6 +12,16 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
+ * RETIRED (charge-types unification, Sept 2026): no route points here any
+ * more — see routes/web.php's comment where the old 'facilities.*' group
+ * used to be. Finance\ChargeTypeController is this screen's replacement,
+ * covering the same ground (and everything else chargeable) from one
+ * unified, admin-editable list. Left in place, unrouted, only so nothing
+ * that might still directly reference this class breaks; the
+ * `facilities`/`facility_rates` tables it manages are still very much
+ * live underneath ChargeType — see ChargeTypeService's own docblock —
+ * just no longer edited from here.
+ *
  * Admin-level configuration of facilities and their rates — separate
  * from FacilityAccessController, which is the front-desk day-to-day
  * screen for actually granting/selling access. Gated on 'manage-facilities'

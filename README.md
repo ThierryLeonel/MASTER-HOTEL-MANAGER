@@ -578,6 +578,41 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Charge types unified into one editable list — bar, restaurant, front desk, rental, Gym, Pool, and anything you add (`CORRECTION_ROUND_34_DELIVERY.md` §26)**
+- Direct request: "normally we have bar charge, restaurant charge, frontdesk charge, rental charge, pool
+  fee, Gym Fee, etc include all connect them and charges can be posted and payment can be recieved and
+  recorde to the diferent sources, just build it in such a way i can edit and or just add or delete."
+  Clarified with the user as one unified list, with Gym & Swimming Pool folded into it.
+- New **Charge Types** screen (Finance → Charge Types) replaces both the old, hardcoded 5-type charge list
+  and the separate "Facilities" (Gym/Pool) admin screen. Add, rename, or remove a charge type at any time;
+  say whether it posts to a guest's folio, can be sold on the spot to a walk-in, is free for resident
+  guests, and which department it belongs to for reporting — no code deploy needed for any of it. The seven
+  charge types this system relies on structurally are protected (can't be deactivated, deleted, or have
+  their code changed) but stay fully editable otherwise.
+- Closed two genuine pre-existing defects found while building this: "Bar Outside charge"/"Bucareaux
+  charge" were already offered on the "Post charge" form but always failed — never actually valid, at
+  either the code or (more seriously) the database level, until now. Every existing charge, payment, and
+  report keeps working exactly as before — this only makes the list itself editable (§26).
+- The Sept 2026 Bar/Restaurant revenue-recognition fix (§22) now generalizes to Bar Outside, Bucareaux, and
+  any future charge type an admin attaches to a department, instead of only Bar and Restaurant by name.
+
+**Book multiple rooms in one submission; sidebar keeps its scroll position; a payment can note who handed it in (`CORRECTION_ROUND_34_DELIVERY.md` §23-25)**
+- **Multi-room booking** — direct request: "i want to be able to book multi reservations and multi bookings
+  instead of entering 1 by 1." Clarified with the user as one guest/party booking several rooms for the same
+  stay dates in a single submission. New "Book Multiple Rooms" screen lets staff add as many rooms as needed
+  (each keeping its own category, rate, and occupancy) and submit them together — all created as `pending`,
+  sharing a group reference so staff can navigate between a party's rooms from any one of them, but otherwise
+  approved/checked-in/cancelled individually exactly as before. All-or-nothing: an invalid room anywhere in
+  the batch means none of them are created (§25).
+- **Sidebar menu no longer resets to the top on every click** — direct request: "when on clicks on a
+  particular menu it should not scroll back to the beginning." Since every navigation is a full page reload,
+  the sidebar used to snap back to the top on every click; it now remembers and restores its scroll position
+  (§23).
+- **A payment can note who personally handed the cash in** — refinement of the Bar/Restaurant revenue fix
+  just below: "the place in the payment form that request on who handed the sales should either be the
+  department or a textbox that receive the name of the person handing." Added as an independent, purely
+  informational field alongside the department dropdown — fill in either, both, or neither (§24).
+
 **Screenshot-review fixes: revenue recognition for Bar/Restaurant, shift-variance notes, a 500 error, ADR/RevPAR labels, and a guest-history shortcut (`CORRECTION_ROUND_34_DELIVERY.md` §18-22)**
 - **All Transactions 500 error, fixed** — a hardcoded route name in the view didn't match its actual
   registered (nested) name; the page threw the instant it had a real row to render (§18).

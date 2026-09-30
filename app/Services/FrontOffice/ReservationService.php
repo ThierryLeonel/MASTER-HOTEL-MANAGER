@@ -42,6 +42,14 @@ class ReservationService
         return DB::transaction(function () use ($data, $requestedBy) {
             $reservation = Reservation::create([
                 'reservation_number' => $this->generateNumber(),
+                // Direct request ("book multi reservations and multi
+                // bookings instead of entering 1 by 1"): an ordinary
+                // single-reservation caller never sets this key, so
+                // `$data['group_reference'] ?? null` keeps every existing
+                // call to create() completely unaffected — only
+                // createGroup() below ever passes one. See that method
+                // and this column's migration for the full reasoning.
+                'group_reference' => $data['group_reference'] ?? null,
                 'guest_id' => $data['guest_id'],
                 'room_category_id' => $data['room_category_id'],
                 'check_in_date' => $data['check_in_date'],
@@ -59,6 +67,42 @@ class ReservationService
             $this->audit->log('reservation.created', 'front_office', $reservation, null, $reservation->toArray(), actor: $requestedBy);
 
             return $reservation;
+        });
+    }
+
+    /**
+     * Direct request ("i want to be able to book multi reservations and
+     * multi bookings instead of entering 1 by 1"): one guest/party
+     * booking several rooms for the same stay dates in a single
+     * submission — e.g. a family taking three rooms for the same three
+     * nights. Deliberately reuses create() once per room rather than
+     * duplicating its logic, so every existing rule (pending-by-default,
+     * audit logging, validation) applies identically to each room; the
+     * only new behavior is the shared `group_reference` stamped on all of
+     * them and the all-or-nothing transaction wrapping the whole batch —
+     * if any one room's data were somehow invalid, none of the rooms in
+     * this submission are created, rather than leaving a partial party
+     * booked. Each room can have its own category and rate (a family
+     * might take one Deluxe and two Standard rooms), but every room
+     * shares the same guest, dates, and notes — a genuinely different
+     * guest or date range is a separate booking, not part of this party.
+     *
+     * @param  array{guest_id:int, check_in_date:string, check_out_date:string, notes?:string}  $shared
+     * @param  array<int, array{room_category_id:int, rate_quoted:float, adults?:int, children?:int, deposit_required?:float}>  $rooms
+     * @return \Illuminate\Support\Collection<int, Reservation>
+     */
+    public function createGroup(array $shared, array $rooms, User $requestedBy): \Illuminate\Support\Collection
+    {
+        if (count($rooms) < 1) {
+            throw new HmsException('At least one room is required to create a booking.');
+        }
+
+        return DB::transaction(function () use ($shared, $rooms, $requestedBy) {
+            $groupReference = $this->generateGroupReference();
+
+            return collect($rooms)->map(function (array $room) use ($shared, $requestedBy, $groupReference) {
+                return $this->create(array_merge($shared, $room, ['group_reference' => $groupReference]), $requestedBy);
+            });
         });
     }
 
@@ -631,5 +675,16 @@ class ReservationService
     private function generateNumber(): string
     {
         return 'RSV-'.now()->format('Ymd').'-'.strtoupper(Str::random(5));
+    }
+
+    /**
+     * A short, human-showable tag linking every room in one multi-room
+     * booking — deliberately distinct from a reservation_number (which
+     * stays unique per room) so staff can recognise "these came from the
+     * same submission" at a glance (e.g. on the Reservations list).
+     */
+    private function generateGroupReference(): string
+    {
+        return 'GRP-'.now()->format('Ymd').'-'.strtoupper(Str::random(5));
     }
 }

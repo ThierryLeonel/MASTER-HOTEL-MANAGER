@@ -4,6 +4,7 @@ namespace App\Services\Reporting;
 
 use App\Models\AccountsReceivable;
 use App\Models\CashDisbursement;
+use App\Models\ChargeType;
 use App\Models\Department;
 use App\Models\Expense;
 use App\Models\FolioTransaction;
@@ -68,15 +69,18 @@ class FinancialReportService
      * same rows (same department-id filter) so this money is recognised
      * exactly once across the whole reporting suite, never twice.
      *
-     * Scoped to Bar and Restaurant only — the two departments the user
-     * named, and the only two with a matching FolioTransaction charge
-     * type (bar_charge/restaurant_charge). Bar Outside and Bucareaux have
-     * no charge-type bucket of their own in FolioTransaction::CHARGE_TYPES,
-     * so a payment attributed to either of those still counts as that
-     * department's own cash and sales in the Department Payment
-     * Reconciliation report (see
-     * DepartmentReconciliationReportService::salesFor()) but keeps
-     * showing under "other income" here, same as before this fix.
+     * Charge-types unification (Sept 2026 — see ChargeType's own
+     * docblock): this used to be scoped to Bar and Restaurant only, via a
+     * hardcoded `DEPARTMENT_CODE_TO_CHARGE_TYPE = ['BAR' => 'bar_charge',
+     * 'REST' => 'restaurant_charge']` map — the only two departments that
+     * had a matching FolioTransaction charge type at the time. Now that
+     * every charge type can carry its own `department_id` (an admin
+     * setting, not a code constant), manuallyRecognizedOutletRevenue()
+     * below reads that mapping live from `charge_types` instead, so Bar
+     * Outside and Bucareaux (closing the exact "other income" limitation
+     * this docblock used to describe) and any future admin-added type
+     * with a department attached are recognised the same way, with no
+     * further code changes ever needed.
      *
      * IMPORTANT — this does not retroactively reclassify anything already
      * recorded: a payment with a blank/Front-Office department_id (every
@@ -86,10 +90,6 @@ class FinancialReportService
      * recognised this way — consistent with this engagement's rule of
      * never rewriting historical financial records.
      */
-    private const DEPARTMENT_CODE_TO_CHARGE_TYPE = [
-        'BAR' => 'bar_charge',
-        'REST' => 'restaurant_charge',
-    ];
 
     /**
      * @return array{by_type: array<string, float>, total: float}
@@ -97,8 +97,9 @@ class FinancialReportService
     public function revenueByChargeType(Carbon $start, Carbon $end): array
     {
         $range = [$start->copy()->startOfDay(), $end->copy()->endOfDay()];
+        $chargeTypeCodes = FolioTransaction::postableChargeTypeCodes();
 
-        $rows = FolioTransaction::whereIn('type', FolioTransaction::CHARGE_TYPES)
+        $rows = FolioTransaction::whereIn('type', $chargeTypeCodes)
             ->whereNull('voided_at')
             ->whereBetween('transaction_date', $range)
             ->selectRaw('type, SUM(amount) as total')
@@ -106,7 +107,7 @@ class FinancialReportService
             ->pluck('total', 'type');
 
         $byType = [];
-        foreach (FolioTransaction::CHARGE_TYPES as $type) {
+        foreach ($chargeTypeCodes as $type) {
             $byType[$type] = (float) ($rows[$type] ?? 0);
         }
 
@@ -120,14 +121,40 @@ class FinancialReportService
     /**
      * See revenueByChargeType()'s docblock for the full reasoning.
      *
+     * Front Office's own department is deliberately excluded from this
+     * mapping (same as before this generalization, when the map only
+     * ever held BAR/REST): this mechanism exists for an outlet that has
+     * no device/terminal of its own and so hands its cash takings to the
+     * accountant to record and attribute — Front Office always has its
+     * own terminal and posts its own charges directly to folios, so a
+     * payment ever manually attributed to it isn't this kind of handover.
+     * Excluding it also sidesteps a real ambiguity: Front Office
+     * legitimately owns THREE charge types (room_charge,
+     * front_desk_charge, other_service — see
+     * DepartmentReconciliationReportService::salesFor()), so a payment
+     * attributed to it could never be resolved to a single one of them
+     * anyway.
+     *
+     * Known, accepted limitation: if an admin ever attaches the SAME
+     * (non-Front-Office) department to two different charge types, only
+     * one of them receives a manually recorded payment's revenue here
+     * (the lowest charge_type id wins, since it's applied last below) —
+     * this can't happen from the seeded data and would take a
+     * deliberate, unusual admin choice to trigger, so it's documented
+     * here rather than engineered around speculatively.
+     *
      * @param array{0: Carbon, 1: Carbon} $range
-     * @return array<string, float> keyed by FolioTransaction charge type
+     * @return array<string, float> keyed by charge type code
      */
     private function manuallyRecognizedOutletRevenue(array $range): array
     {
-        $departmentIdToType = Department::whereIn('code', array_keys(self::DEPARTMENT_CODE_TO_CHARGE_TYPE))
-            ->get()
-            ->mapWithKeys(fn (Department $d) => [$d->id => self::DEPARTMENT_CODE_TO_CHARGE_TYPE[$d->code]]);
+        $foDepartmentId = Department::where('code', 'FO')->value('id');
+
+        $departmentIdToType = ChargeType::whereNotNull('department_id')
+            ->where('postable_to_folio', true)
+            ->when($foDepartmentId, fn ($q) => $q->where('department_id', '!=', $foDepartmentId))
+            ->orderByDesc('id')
+            ->pluck('code', 'department_id');
 
         if ($departmentIdToType->isEmpty()) {
             return [];
@@ -160,8 +187,14 @@ class FinancialReportService
      */
     private function recognizedOutletDepartmentIds(): array
     {
-        return Department::whereIn('code', array_keys(self::DEPARTMENT_CODE_TO_CHARGE_TYPE))
-            ->pluck('id')
+        $foDepartmentId = Department::where('code', 'FO')->value('id');
+
+        return ChargeType::whereNotNull('department_id')
+            ->where('postable_to_folio', true)
+            ->when($foDepartmentId, fn ($q) => $q->where('department_id', '!=', $foDepartmentId))
+            ->pluck('department_id')
+            ->unique()
+            ->values()
             ->all();
     }
 

@@ -134,6 +134,12 @@ class PaymentController extends Controller
                 'nullable',
                 Rule::in(Department::whereIn('code', self::ATTRIBUTABLE_DEPARTMENT_CODES)->pluck('id')->all()),
             ],
+            // Direct request (Sept 2026 refinement): "the place in the
+            // payment form that request on who handed the sales should
+            // either be the department or a textbox that receive the
+            // name of the person handing." Independent of department_id
+            // above — either, both, or neither can be filled in.
+            'handed_over_by' => 'nullable|string|max:120',
         ]);
 
         $guest = ! empty($data['guest_id']) ? Guest::find($data['guest_id']) : null;
@@ -171,6 +177,7 @@ class PaymentController extends Controller
             discountAmount: isset($data['discount_amount']) ? (float) $data['discount_amount'] : null,
             discountReason: $data['discount_reason'] ?? null,
             departmentId: ! empty($data['department_id']) ? (int) $data['department_id'] : null,
+            handedOverBy: $data['handed_over_by'] ?? null,
         );
 
         return back()->with('status', 'Payment recorded.');

@@ -59,6 +59,22 @@
                         @endforeach
                     </select>
                     <p class="mt-1 text-xs text-slate-500">Choose this when the amount is a department's total takings handed over because it has no payment device of its own — it will then show up as that department's real revenue in the reports, not as generic income.</p>
+                    {{--
+                        Direct request ("the place in the payment form
+                        that request on who handed the sales should
+                        either be the department or a textbox that
+                        receive the name of the person handing"): a
+                        separate, purely informational note of WHO
+                        physically brought the cash in — for when there
+                        is no clean department to pick, or simply to
+                        record the individual alongside whichever
+                        department was chosen above. Independent of the
+                        dropdown: fill in either, both, or neither. Never
+                        affects revenue recognition or any report total —
+                        see `payments.handed_over_by`'s migration.
+                    --}}
+                    <label class="mt-2 block text-xs font-medium mb-1">Or note who personally handed this in (optional)</label>
+                    <input type="text" name="handed_over_by" placeholder="e.g. Ngozi, bar attendant" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
                 </div>
                 <div>
                     <div class="mb-1 flex items-center justify-between">
@@ -144,10 +160,17 @@
                             <td class="p-3">{{ $payment->payment_number }}</td>
                             <td class="p-3">{{ $payment->guest->full_name ?? $payment->notes }}</td>
                             <td class="p-3">{{ $payment->income_source ?? '—' }}</td>
+                            @php
+                                $showsDepartment = $payment->department && $payment->department->code !== 'FO';
+                            @endphp
                             <td class="p-3">
-                                @if ($payment->department && $payment->department->code !== 'FO')
+                                @if ($showsDepartment)
                                     <span class="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-800">{{ $payment->department->name }}</span>
-                                @else
+                                @endif
+                                @if ($payment->handed_over_by)
+                                    <div class="text-[10px] text-slate-500">Handed in by {{ $payment->handed_over_by }}</div>
+                                @endif
+                                @if (! $showsDepartment && ! $payment->handed_over_by)
                                     <span class="text-slate-400">—</span>
                                 @endif
                             </td>

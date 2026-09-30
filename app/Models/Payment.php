@@ -29,7 +29,13 @@ class Payment extends Model
 
     protected $fillable = [
         'payment_number', 'direction', 'amount', 'method', 'financial_account_id', 'source_module',
-        'department_id', 'source_reference', 'reference_type', 'reference_id',
+        'department_id',
+        // Direct request (Sept 2026 refinement): who physically handed
+        // this cash over, when that's worth noting alongside (or instead
+        // of) a formal department attribution — see this column's
+        // migration for the full reasoning. Purely informational.
+        'handed_over_by',
+        'source_reference', 'reference_type', 'reference_id',
         'guest_id', 'recorded_by', 'recorded_at', 'notes',
         // Correction round (audited defects #30 and #32).
         'business_date', 'shift_id', 'idempotency_key',

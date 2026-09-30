@@ -285,6 +285,56 @@ class PaymentModuleTest extends TestCase
         $this->assertSame($fo->id, $payment->department_id);
     }
 
+    /**
+     * Sept 2026 refinement ("the place in the payment form that request
+     * on who handed the sales should either be the department or a
+     * textbox that receive the name of the person handing"): a payment
+     * can note who physically handed the cash over, independent of
+     * (alongside, or instead of) a formal department attribution.
+     */
+    public function test_a_payment_can_note_who_personally_handed_it_in(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $bar = \App\Models\Department::where('code', 'BAR')->first();
+
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 27500,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Bar takings handed over',
+            'income_source' => 'BAR AND RESTAURANT',
+            'department_id' => $bar->id,
+            'handed_over_by' => 'Ngozi, bar attendant',
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $this->assertSame($bar->id, $payment->department_id);
+        $this->assertSame('Ngozi, bar attendant', $payment->handed_over_by);
+    }
+
+    /**
+     * A payment can name who handed it in WITHOUT attributing it to any
+     * department — the two fields are independent, since sometimes
+     * there's a name to record but no department the money should be
+     * formally recognised under.
+     */
+    public function test_a_payment_can_note_who_handed_it_in_without_a_department(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 5000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Rent',
+            'income_source' => 'Rent',
+            'handed_over_by' => 'Mr. Tanga (tenant)',
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $fo = \App\Models\Department::where('code', 'FO')->first();
+        $this->assertSame($fo->id, $payment->department_id, 'No department was chosen, so this still defaults to Front Office as always.');
+        $this->assertSame('Mr. Tanga (tenant)', $payment->handed_over_by);
+    }
+
     public function test_a_payment_with_no_discount_reports_none(): void
     {
         $accountant = $this->userWithRole('accountant');

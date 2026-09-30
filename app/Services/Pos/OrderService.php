@@ -492,10 +492,15 @@ class OrderService
                 $folio = $stay->folio()->firstOrFail();
                 // Generalized (was a bar/restaurant-only ternary) so a
                 // third+ outlet's deferred charges post under their own
-                // type automatically — see FolioTransaction::CHARGE_TYPES,
-                // which every outlet's "{outlet}_charge" must already be a
-                // member of before this can succeed (postCharge() throws
-                // HmsException otherwise).
+                // type automatically — see
+                // FolioTransaction::postableChargeTypeCodes(), which every
+                // outlet's "{outlet}_charge" must already be a member of
+                // before this can succeed (postCharge() throws
+                // HmsException otherwise). Charge-types unification (Sept
+                // 2026) is what made bar_outside_charge/bucareaux_charge
+                // actually succeed here for the first time — see the
+                // charge-types seed migration's docblock for that
+                // pre-existing gap.
                 $chargeType = "{$locked->outlet}_charge";
 
                 $this->folioService->postCharge(

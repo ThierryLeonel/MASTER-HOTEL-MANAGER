@@ -8,7 +8,6 @@ use App\Services\Sync\Concerns\HasSyncUlid;
 class FolioTransaction extends Model
 {
     use HasSyncUlid;
-    public const CHARGE_TYPES = ['room_charge', 'bar_charge', 'restaurant_charge', 'front_desk_charge', 'other_service'];
 
     public const CREDIT_TYPES = ['payment', 'refund', 'credit_settlement'];
 
@@ -64,5 +63,44 @@ class FolioTransaction extends Model
     public function isVoided(): bool
     {
         return $this->voided_at !== null;
+    }
+
+    /**
+     * Charge-types unification (Sept 2026 — see ChargeType's own
+     * docblock): replaces the old hardcoded
+     * `CHARGE_TYPES = ['room_charge', 'bar_charge', 'restaurant_charge',
+     * 'front_desk_charge', 'other_service']` constant with a live read of
+     * the admin-editable `charge_types` table, so a newly added charge
+     * type (e.g. "Rental Charge") is usable everywhere this used to be
+     * checked without another code deploy.
+     *
+     * Every code this system has EVER considered valid to post to a
+     * folio, whether or not it's still active today — used for lifetime/
+     * historical totals (guest stay history, department reconciliation)
+     * where a since-deactivated or admin-added type must still be counted
+     * correctly against transactions posted while it was active. This
+     * deliberately does NOT filter by `is_active`.
+     */
+    public static function allChargeTypeCodes(): array
+    {
+        return ChargeType::query()->pluck('code')->all();
+    }
+
+    /**
+     * Only the charge types allowed to be POSTED to a folio right now —
+     * active AND `postable_to_folio`. This is what live validation
+     * (FolioService::postCharge(), FolioController::charge()) and the
+     * "Post charge" dropdown use; a deactivated type, or a walk-in-only
+     * one like Gym/Pool (`postable_to_folio = false`), is correctly
+     * excluded even though it still counts in allChargeTypeCodes() for
+     * historical totals.
+     */
+    public static function postableChargeTypeCodes(): array
+    {
+        return ChargeType::query()
+            ->where('is_active', true)
+            ->where('postable_to_folio', true)
+            ->pluck('code')
+            ->all();
     }
 }

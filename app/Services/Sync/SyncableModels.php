@@ -8,6 +8,8 @@ use App\Models\AttendanceRecord;
 use App\Models\AuditLog;
 use App\Models\CashDisbursement;
 use App\Models\CashReconciliation;
+use App\Models\ChargeType;
+use App\Models\ChargeTypeRate;
 use App\Models\Company;
 use App\Models\Department;
 use App\Models\DisbursementTicket;
@@ -86,6 +88,8 @@ class SyncableModels
         AuditLog::class,
         CashDisbursement::class,
         CashReconciliation::class,
+        ChargeType::class,
+        ChargeTypeRate::class,
         Company::class,
         Department::class,
         DisbursementTicket::class,

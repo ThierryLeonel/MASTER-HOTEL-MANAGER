@@ -2,6 +2,11 @@
 @section('title', 'Facilities')
 @section('content')
 
+{{-- RETIRED (charge-types unification, Sept 2026): no route renders this
+     view any more — see resources/views/finance/charge-types/index.blade.php,
+     its replacement. Left in place only so nothing breaks if something
+     still references it directly. --}}
+
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     @foreach ($facilities as $facility)
         <div class="rounded-lg bg-white shadow-sm p-4 space-y-3">

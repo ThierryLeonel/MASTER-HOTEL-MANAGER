@@ -178,8 +178,12 @@
                 @can('grant-facility-access')
                     <a href="{{ route('facility-access.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('facility-access.*') ? 'is-selected' : '' }}">Gym &amp; Pool</a>
                 @endcan
-                @can('manage-facilities')
-                    <a href="{{ route('facilities.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('facilities.*') ? 'is-selected' : '' }}">Facilities (rates)</a>
+                {{-- Charge-types unification (Sept 2026): replaces the old
+                     "Facilities (rates)" screen — Gym/Pool are now just two
+                     entries on this one editable list alongside bar,
+                     restaurant, front desk, and anything else added here. --}}
+                @can('manage-charge-types')
+                    <a href="{{ route('charge-types.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('charge-types.*') ? 'is-selected' : '' }}">Charge Types</a>
                 @endcan
                 @can('manage-housekeeping')
                     <a href="{{ route('housekeeping.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('housekeeping.*') ? 'is-selected' : '' }}">Housekeeping</a>
@@ -333,6 +337,45 @@
                 </form>
             </div>
         </aside>
+
+        <script>
+        // Direct request ("when one clicks on a particular menu it should
+        // not scroll back to the beginning"): this app has no build step
+        // (every view is server-rendered Blade — see this layout's own
+        // "Fix the scrolling sense" note above), so every sidebar click is
+        // a full page reload, and the freshly rendered <aside> always
+        // starts scrolled back to the very top. With this many sections
+        // (Front Office, POS outlets, Inventory, Finance, HR, Admin, ...)
+        // that meant re-scrolling to find your place after every single
+        // click if you were working from something lower down the menu.
+        // This script sits right here, immediately after the <aside>
+        // itself, so it runs the instant that element exists in the DOM —
+        // before the rest of the page even finishes parsing — restoring
+        // its previous scroll position with the smallest possible visible
+        // jump, then keeps that position updated on every scroll so the
+        // next page load can pick it back up. sessionStorage (not a
+        // cookie, not localStorage) is deliberate: scoped to this one
+        // browser tab's current session, cleared when it's closed, and
+        // never sent to the server.
+        (function () {
+            try {
+                var sidebar = document.getElementById('app-sidebar');
+                if (!sidebar) return;
+
+                var saved = sessionStorage.getItem('hms-sidebar-scroll');
+                if (saved !== null) {
+                    sidebar.scrollTop = parseInt(saved, 10) || 0;
+                }
+
+                sidebar.addEventListener('scroll', function () {
+                    sessionStorage.setItem('hms-sidebar-scroll', String(sidebar.scrollTop));
+                }, { passive: true });
+            } catch (e) {
+                // Private browsing / storage disabled — the menu just
+                // behaves as it always did; nothing else depends on this.
+            }
+        })();
+        </script>
 
         <main id="app-main" class="min-w-0 flex-1 p-4 md:p-6">
             @if (session('status'))

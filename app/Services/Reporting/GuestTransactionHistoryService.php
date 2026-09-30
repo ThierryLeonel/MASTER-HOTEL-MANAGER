@@ -187,8 +187,12 @@ class GuestTransactionHistoryService
         $byType = $transactions->groupBy('type')->map(fn ($rows) => round((float) $rows->sum('amount'), 2));
 
         return [
+            // Charge-types unification (Sept 2026): allChargeTypeCodes(),
+            // not postableChargeTypeCodes() — a guest's historical
+            // transaction totals must keep including a charge type even
+            // after it's since been deactivated or retired.
             'charges' => round(
-                collect(FolioTransaction::CHARGE_TYPES)->sum(fn ($type) => (float) ($byType[$type] ?? 0)),
+                collect(FolioTransaction::allChargeTypeCodes())->sum(fn ($type) => (float) ($byType[$type] ?? 0)),
                 2
             ),
             'payments' => (float) ($byType['payment'] ?? 0),

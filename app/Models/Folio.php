@@ -84,13 +84,15 @@ class Folio extends Model
      */
     public function departmentSummary(): array
     {
-        $labels = [
-            'room_charge' => 'Room (lodging)',
-            'bar_charge' => 'Bar',
-            'restaurant_charge' => 'Restaurant',
-            'front_desk_charge' => 'Front desk sales',
-            'other_service' => 'Other services',
-        ];
+        // Charge-types unification (Sept 2026 — see ChargeType's own
+        // docblock): this used to be a hardcoded 5-entry label array that
+        // silently couldn't recognise bar_outside_charge/bucareaux_charge
+        // (a pre-existing latent bug — see the charge-types seed
+        // migration's docblock) or any admin-added type like "Rental
+        // Charge." Reading straight from `charge_types` means a folio
+        // correctly breaks out every charge type that's ever existed,
+        // including one added or renamed after this code shipped.
+        $labels = ChargeType::query()->pluck('name', 'code')->all();
 
         // Correction round (audited defect #16): same fix as
         // recomputeBalance() above — no longer excludes voided rows,

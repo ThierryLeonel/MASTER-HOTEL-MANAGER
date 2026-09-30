@@ -101,7 +101,13 @@ class OperationsReportService
                 $folio = $stay->folio;
                 $transactions = $folio ? $folio->transactions()->whereNull('voided_at')->get() : collect();
 
-                $totalCharged = (float) $transactions->whereIn('type', FolioTransaction::CHARGE_TYPES)->sum('amount');
+                // Charge-types unification (Sept 2026): allChargeTypeCodes()
+                // (not postableChargeTypeCodes()) deliberately, since a
+                // closed stay's history has to keep totaling correctly even
+                // for a charge type that's since been deactivated or
+                // retired — see FolioTransaction::allChargeTypeCodes()'s
+                // own docblock.
+                $totalCharged = (float) $transactions->whereIn('type', FolioTransaction::allChargeTypeCodes())->sum('amount');
                 $totalPaid = (float) $transactions->where('type', 'payment')->sum(fn ($tx) => abs((float) $tx->amount));
 
                 return [

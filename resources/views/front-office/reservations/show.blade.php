@@ -6,6 +6,29 @@
         <div class="flex justify-end">
             <a href="{{ route('reservations.print', $reservation) }}" class="text-xs text-slate-500 underline">Print confirmation</a>
         </div>
+        @if ($reservation->isGrouped())
+            {{--
+                Direct request ("book multi reservations and multi
+                bookings instead of entering 1 by 1"): every other room
+                from the same multi-room submission, so staff can jump
+                between the whole party's rooms from any one of them.
+                Each sibling is still its own independent reservation —
+                approve/reject/check-in/cancel all happen per room,
+                exactly as before this feature existed.
+            --}}
+            <div class="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
+                <p class="font-medium text-blue-800">Part of a multi-room booking ({{ $groupSiblings->count() + 1 }} rooms total)</p>
+                <ul class="mt-1 space-y-1">
+                    @foreach ($groupSiblings as $sibling)
+                        <li>
+                            <a href="{{ route('reservations.show', $sibling) }}" class="text-blue-700 hover:underline">{{ $sibling->reservation_number }}</a>
+                            — {{ $sibling->roomCategory->name }}
+                            <span class="rounded bg-white px-1.5 py-0.5 text-xs">{{ $sibling->status }}</span>
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
         <div><span class="text-slate-500">Guest:</span> {{ $reservation->guest->full_name }}</div>
         <div><span class="text-slate-500">Category:</span> {{ $reservation->roomCategory->name }}</div>
         <div><span class="text-slate-500">Room:</span> {{ $reservation->room->room_number ?? 'Not yet assigned' }}</div>

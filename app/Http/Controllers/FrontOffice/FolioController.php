@@ -9,6 +9,7 @@ use App\Models\FolioTransaction;
 use App\Services\Finance\ShiftGateService;
 use App\Services\FrontOffice\FolioService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class FolioController extends Controller
 {
@@ -27,8 +28,13 @@ class FolioController extends Controller
         // are.
         $this->shiftGate->assertOpenForCode('FO');
 
+        // Charge-types unification (Sept 2026): this used to be a hardcoded
+        // 5-value `in:` list — see FolioTransaction::postableChargeTypeCodes()
+        // for why it's now a live read of the admin-editable charge types
+        // list (also the fix for the pre-existing bar_outside_charge/
+        // bucareaux_charge gap — see the charge-types seed migration).
         $data = $request->validate([
-            'type' => 'required|in:room_charge,bar_charge,restaurant_charge,front_desk_charge,other_service',
+            'type' => ['required', Rule::in(FolioTransaction::postableChargeTypeCodes())],
             'amount' => 'required|numeric|min:0.01',
             'description' => 'required|string|max:255',
         ]);

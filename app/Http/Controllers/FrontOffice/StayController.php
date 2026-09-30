@@ -40,7 +40,16 @@ class StayController extends Controller
         // bare method — see FolioController::payment()'s docblock.
         $financialAccounts = FinancialAccount::where('is_active', true)->orderBy('name')->get();
 
-        return view('front-office.stays.show', compact('stay', 'financialAccounts'));
+        // Charge-types unification (Sept 2026): the "Post charge" dropdown
+        // used to be a hardcoded 7-option <select> — now reads the live,
+        // admin-editable list, so a newly added charge type (e.g. "Rental
+        // Charge") shows up here immediately with no template change.
+        $postableChargeTypes = \App\Models\ChargeType::where('is_active', true)
+            ->where('postable_to_folio', true)
+            ->orderBy('name')
+            ->get();
+
+        return view('front-office.stays.show', compact('stay', 'financialAccounts', 'postableChargeTypes'));
     }
 
     /**

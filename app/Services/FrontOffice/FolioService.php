@@ -27,7 +27,7 @@ class FolioService
 
     public function postCharge(Folio $folio, string $type, float $amount, string $description, User $actor, string $sourceModule = 'front_office', ?string $reference = null): FolioTransaction
     {
-        if (! in_array($type, FolioTransaction::CHARGE_TYPES, true)) {
+        if (! in_array($type, FolioTransaction::postableChargeTypeCodes(), true)) {
             throw new HmsException("Invalid charge type: {$type}");
         }
 

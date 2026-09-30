@@ -74,6 +74,53 @@ class ReservationController extends Controller
         return redirect()->route('reservations.show', $reservation)->with('status', 'Reservation created and awaiting approval.');
     }
 
+    /**
+     * Direct request ("i want to be able to book multi reservations and
+     * multi bookings instead of entering 1 by 1"): the form for one
+     * guest/party booking several rooms, for the same stay dates, in one
+     * submission — see ReservationService::createGroup()'s docblock for
+     * the full reasoning.
+     */
+    public function createMulti(Request $request)
+    {
+        $categories = RoomCategory::where('is_active', true)->get();
+
+        $prefillGuest = null;
+        if ($prefillGuestId = $request->integer('guest_id') ?: null) {
+            $prefillGuest = Guest::find($prefillGuestId);
+        }
+
+        return view('front-office.reservations.create-multi', compact('categories', 'prefillGuest'));
+    }
+
+    public function storeMulti(Request $request)
+    {
+        $data = $request->validate([
+            'guest_id' => 'required|exists:guests,id',
+            'check_in_date' => 'required|date|after_or_equal:today',
+            'check_out_date' => 'required|date|after:check_in_date',
+            'notes' => 'nullable|string',
+            'rooms' => 'required|array|min:1',
+            'rooms.*.room_category_id' => 'required|exists:room_categories,id',
+            'rooms.*.rate_quoted' => 'required|numeric|min:0',
+            'rooms.*.adults' => 'nullable|integer|min:1|max:20',
+            'rooms.*.children' => 'nullable|integer|min:0|max:20',
+            'rooms.*.deposit_required' => 'nullable|numeric|min:0',
+        ]);
+
+        $shared = [
+            'guest_id' => $data['guest_id'],
+            'check_in_date' => $data['check_in_date'],
+            'check_out_date' => $data['check_out_date'],
+            'notes' => $data['notes'] ?? null,
+        ];
+
+        $reservations = $this->service->createGroup($shared, $data['rooms'], $request->user());
+
+        return redirect()->route('reservations.show', $reservations->first())
+            ->with('status', $reservations->count().' rooms booked together and awaiting approval.');
+    }
+
     public function show(Reservation $reservation)
     {
         $reservation->load(['guest', 'roomCategory', 'room', 'requestedBy', 'approvedBy']);
@@ -102,7 +149,15 @@ class ReservationController extends Controller
         // of approval (see DiscountApprovalService's docblock).
         $eligibleApprovers = User::role(DiscountApprovalService::ELIGIBLE_ROLES)->where('is_active', true)->orderBy('name')->get();
 
-        return view('front-office.reservations.show', compact('reservation', 'availableRooms', 'financialAccounts', 'eligibleApprovers'));
+        // Direct request ("book multi reservations and multi bookings
+        // instead of entering 1 by 1"): every other room booked in the
+        // same multi-room submission as this one, so staff can see and
+        // jump to the rest of the party from any one of its rooms.
+        $groupSiblings = $reservation->isGrouped()
+            ? $reservation->groupSiblings()->with(['roomCategory', 'room'])->orderBy('id')->get()
+            : collect();
+
+        return view('front-office.reservations.show', compact('reservation', 'availableRooms', 'financialAccounts', 'eligibleApprovers', 'groupSiblings'));
     }
 
     /**

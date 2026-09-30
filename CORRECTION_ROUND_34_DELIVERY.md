@@ -1966,3 +1966,223 @@ Added tests covering every part of this fix:
 tag balance verified on the touched view. Same standing limitation as every round in this engagement: no
 `vendor/` in this sandbox, so none of the above was actually executed — only syntax-checked and balance-
 checked. This should be run for real (`php artisan test`) before being treated as verified.
+
+## 23. The sidebar menu no longer resets to the top on every click
+
+**Reported**: "also when on clicks on a particular menu it should not scroll back to the beginning."
+
+**Root cause**: this app has no build step or client-side router — every navigation is a full page reload,
+Blade re-rendered from scratch each time (see `layouts/app.blade.php`'s own earlier "Fix the scrolling sense"
+note). The sidebar (`#app-sidebar`) is long enough, with this many modules (Front Office, Housekeeping, five
+POS outlets, Inventory, Finance, HR, Admin, …), that it scrolls independently of the main content area. A
+freshly rendered `<aside>` always starts scrolled to the very top, so anyone working from a link lower down
+the menu had to re-scroll to find their place after every single click.
+
+**Fix**: a small inline script, placed immediately after the `<aside>` element itself so it runs the instant
+that element exists (before the rest of the page even finishes parsing), restores the sidebar's previous
+scroll position from `sessionStorage` and keeps it updated on every scroll event. `sessionStorage` (not a
+cookie, not `localStorage`) is deliberate — scoped to one browser tab's current session, cleared when that
+tab is closed, and never sent to the server. Wrapped in `try`/`catch` so private browsing or disabled storage
+simply falls back to today's behavior rather than breaking the menu.
+
+### 23.1 Testing disclosure
+
+This is a pure client-side, no-backend-state change — there's no server-side behavior to assert in a feature
+test. Verified with `php -l` (Blade compiles as plain PHP) and a directive/tag-balance check on the touched
+layout file. No `vendor/`, so this was not exercised in a real browser as part of this delivery — worth a
+quick manual click-through on a live deploy to confirm the feel is right.
+
+## 24. A payment can now note who personally handed the cash in, independent of a department (refinement of §22)
+
+**Reported**: "the place in the payment form that request on who handed the sales should either be the
+department or a textbox that receive the name of the person handing."
+
+**Fix**: added a new, purely informational `payments.handed_over_by` column and a matching free-text field on
+the general "record a payment" screen, right below the department dropdown from §22. The two are independent
+— either, both, or neither can be filled in: the department dropdown still drives revenue recognition
+(§22), while this field simply records the name of whoever physically brought the cash in, for the cases
+where there's no clean department to attribute it to, or where recording the individual matters in addition
+to the department. It is deliberately kept separate from `recorded_by` (the staff member who typed the
+payment into the system), since those are very often two different people — an accountant recording money a
+bar attendant handed them, for instance. Shown on the Payments list underneath the department badge.
+
+### 24.1 Testing disclosure
+
+Added two tests to `tests/Feature/FrontOffice/PaymentModuleTest.php`: a payment can note who handed it in
+alongside a department attribution, and a payment can note who handed it in with no department at all (still
+defaults to Front Office, unchanged). `php -l` clean; Blade tag/directive balance verified on the touched
+view. No `vendor/`, so not actually executed.
+
+## 25. Booking multiple rooms in one submission, instead of one reservation at a time
+
+**Reported**: "i want to be able to book multi reservations and multi bookings instead of entering 1 by 1."
+Clarified with the user before building this (the scope was genuinely ambiguous — a multi-room party booking
+and a bulk/independent-bookings entry grid are both reasonable readings of "multi bookings"): confirmed as
+**one guest/party booking several rooms for the same stay dates in a single submission** — e.g. a family
+taking three rooms for the same three nights, rather than filling out "New Reservation" three separate
+times.
+
+**Design**: deliberately additive, reusing the existing single-reservation machinery rather than building a
+parallel system:
+- A new nullable `reservations.group_reference` column (migration
+  `2025_02_02_001000_add_group_reference_to_reservations_table.php`) — shared by every reservation created
+  together in one multi-room submission, `null` for an ordinary single reservation. Every reservation
+  created before this shipped, and every single-room booking made after it through the unchanged
+  `reservations.create`/`reservations.store` screen, is completely unaffected.
+- `ReservationService::createGroup()` wraps one `create()` call per room in a single database transaction
+  under one freshly generated group reference — reusing `create()` means every existing rule (pending by
+  default, audit logging, per-room validation) applies identically to each room in the party, with no logic
+  duplicated. All-or-nothing: if any one room's data is invalid, none of the rooms in that submission are
+  created, never a partially-booked party.
+- Each room in the party keeps its own category, nightly rate, and occupancy (a family might take one
+  Deluxe and two Standard rooms) — only the guest, dates, and notes are shared across the whole booking.
+- A new "Book Multiple Rooms" screen (`reservations.create-multi` / `reservations.store-multi`, gated by the
+  same `manage-reservations` permission as the regular form) lets staff add as many room rows as needed with
+  a plain-JS "+ Add another room" button (the same no-build-step, clone-a-template-row pattern already used
+  elsewhere in this app), then submit them all together.
+- Every room created this way is still `pending`, approved/rejected/checked-in/cancelled individually, one
+  room at a time, exactly like today — this feature only changes how the rooms are *created*, nothing about
+  the reservation lifecycle afterward. Viewing any one room in a group now shows a "Part of a multi-room
+  booking" panel linking to every sibling room, so staff can navigate the whole party from any one of its
+  rooms. The Reservations list also shows a small "Grouped" badge next to a grouped reservation's number.
+
+### 25.1 Testing disclosure
+
+Added `tests/Feature/FrontOffice/MultiRoomReservationTest.php`: booking three rooms in one submission creates
+three independently-pending reservations sharing one group reference and unique reservation numbers; each
+room keeps its own category/rate/occupancy; an invalid room anywhere in the batch prevents the whole group
+from being created (all-or-nothing); at least one room is required; an ordinary single reservation still has
+no group reference; viewing one room in a group lists its siblings; a role without `manage-reservations`
+cannot reach either new route. `php -l` clean on every touched PHP file; Blade directive/tag balance verified
+on the three touched views (`create-multi.blade.php`, `show.blade.php`, `index.blade.php`). Same standing
+limitation as every round: no `vendor/` in this sandbox, so none of this was actually executed — only
+syntax-checked and balance-checked. This should be run for real (`php artisan test`) before being treated as
+verified, and the multi-room form should get a real click-through on a live deploy given it's new UI.
+
+## 26. Charge types unified into one editable list (bar, restaurant, front desk, rental, Gym, Pool, etc.)
+
+**Reported**: "normally we have bar charge, restaurant charge, frontdesk charge, rental charge, pool fee,
+Gym Fee, etc include all connect them and charges can be posted and payment can be recieved and recorde to
+the diferent sources, just build it in such a way i can edit and or just add or delete."
+
+Clarified with the user before building this: **one unified list, with Gym & Swimming Pool folded into it**
+(not kept as the separate "Facilities" screen they lived on before).
+
+**What existed before this round**: two disconnected systems doing the same conceptual job. A hardcoded PHP
+constant, `FolioTransaction::CHARGE_TYPES` (`room_charge`, `bar_charge`, `restaurant_charge`,
+`front_desk_charge`, `other_service`), referenced across 8 files, that only a code deploy could ever change
+— and a completely separate `Facility`/`FacilityRate` admin screen for Gym & Swimming Pool. Neither could be
+edited, added to, or removed from the way the user asked for.
+
+**What changed**: a new `ChargeType`/`ChargeTypeRate` pair of database tables
+(`2025_02_02_001100_create_charge_types_table.php`) replaces both. Every charge type — the original five,
+Gym, Pool, and anything an admin adds from now on — is one row with: a name and description; a permanently
+fixed, auto-generated `code` (never hand-typed, never edited — see below for why); whether it can be
+**posted to a guest's folio** (`postable_to_folio`); whether it can be **sold on the spot to a walk-in**
+(`walk_in_payable`); whether it's **free for a currently checked-in guest** (`free_for_resident_guests`);
+which **department** it belongs to, for revenue/cash reporting; and whether it's a **system** type this
+software relies on structurally (`is_system` — the seven described below; never deletable, never
+deactivatable, and its code is permanent — but its name, description, department, and flags stay fully
+editable). A new **Charge Types** screen (Finance → Charge Types, gated on a new `manage-charge-types`
+permission — the same Owner/General Manager/Duty Manager tier `manage-facilities` used to be) replaces the
+old "Facilities" screen entirely for create/edit/delete of both charge types and their rates.
+
+**Two genuine, pre-existing defects were found and closed as a direct, unavoidable consequence of this
+unification** — not scope creep, but the same underlying gap the user asked to have fixed generally:
+
+1. The "Post charge" form on a guest's stay already offered "Bar Outside charge" and "Bucareaux charge" as
+   options, and `Pos\OrderService::close()` already tried to defer a Bar Outside/Bucareaux order to a
+   folio under exactly those two type strings — but **neither was ever actually valid**: both the form's
+   server-side validation and the old `CHARGE_TYPES` constant only ever recognized five values. Every
+   attempt to use either of these two, from day one, failed with "Invalid charge type." Both are now seeded
+   as proper system charge types (`2025_02_02_001200_seed_charge_types_from_existing_system.php`) and work
+   correctly end to end.
+2. **More seriously**: even after fixing the code-level validation, a new charge type's code would still
+   have been rejected outright by the database itself. `folio_transactions.type` was a MySQL `ENUM` column
+   with a fixed list of allowed values baked in at the schema level — completely independent of, and
+   invisible to, the PHP-level fix above. An admin adding "Rental Charge" from the new screen would have
+   hit a hard database error the moment anyone tried to actually charge a guest for it, even though the
+   form would have happily accepted the attempt. `2025_02_02_001300_widen_folio_transactions_type_to_string.php`
+   converts that column to a plain, uncapped string (a pure widening — every value the old ENUM allowed
+   still fits, so no existing data changes and no backfill is needed) so this feature's whole premise — add
+   a charge type, use it immediately, no deploy — actually holds all the way down to the database.
+
+**How the unification stays low-risk**: rather than touching the already-live, already-tested
+`facility_accesses` table (whose `facility_id` column is a real, `NOT NULL` foreign key this engagement
+will not risk relaxing without being able to test it for real), every `walk_in_payable` charge type is kept
+transparently backed by a real, auto-managed `Facility` row underneath (`ChargeType.legacy_facility_id`),
+created and kept in sync by `ChargeTypeService` — completely invisible to the admin screen and to every
+front-desk workflow. `FacilityAccessService`/`FacilityAccessController` (the front-desk "grant/sell access"
+screen) now speak `ChargeType`/`ChargeTypeRate` directly; the shadow `Facility`/`FacilityRate` rows are
+purely internal plumbing from here on. `FacilitySeeder` (Gym/Pool's starter data) was updated to create
+this same ChargeType-backed pair directly, so a brand-new install ends up with working Gym/Pool charge
+types exactly like an already-running hotel's do.
+
+**Eight call sites that used to read the old hardcoded list now read live from the database** via two new
+`FolioTransaction` static methods: `postableChargeTypeCodes()` (active + postable — used for **live
+validation**: `FolioService::postCharge()`, `FolioController::charge()`, the "Post charge" dropdown) and
+`allChargeTypeCodes()` (every code ever used, active or not — used for **historical totals** that must
+keep counting a since-deactivated type correctly: `OperationsReportService::guestStayHistory()`,
+`GuestTransactionHistoryService::totalsByType()`). `Folio::departmentSummary()`'s per-department folio
+breakdown, previously a hardcoded 5-entry label array, now reads charge type names live, so it correctly
+labels Bar Outside/Bucareaux (previously silently lumped into "Payments & adjustments") and any new type.
+
+**The Sept 2026 Bar/Restaurant revenue-recognition fix (§22) also generalized**: it used to fold a
+manually-recorded departmental cash handover into revenue only for Bar and Restaurant specifically (a
+hardcoded two-entry map), because those were the only two departments with a matching charge type at the
+time. `FinancialReportService::manuallyRecognizedOutletRevenue()`/`recognizedOutletDepartmentIds()` now read
+this live from `charge_types.department_id`, so the same recognition now also covers Bar Outside and
+Bucareaux, and will cover any future charge type an admin attaches to a department — with no further code
+changes. Front Office's own department is deliberately excluded from this generalization (it always has its
+own terminal and posts its own charges directly, and it structurally owns three charge types at once, which
+this per-department mapping can't resolve to a single one anyway) — a payment ever attributed to Front
+Office continues to fall under "other income," unchanged.
+`DepartmentReconciliationReportService::salesFor()`'s Front-Office-own-sales calculation was similarly
+generalized from a hardcoded 3-code list to "every postable charge type actually assigned to this
+department."
+
+**Old "Facilities" screen**: `FacilityController` and its `facilities.*` routes are retired (no route
+points to them any more) in favor of the new Charge Types screen; the controller and its view are left in
+place, clearly marked as retired in a docblock/comment, purely so nothing that might still reference them
+directly breaks. The `facilities`/`facility_rates` database tables themselves are untouched and still very
+much live underneath Charge Types.
+
+### 26.1 Testing disclosure
+
+New tests: `tests/Feature/Finance/ChargeTypeManagementTest.php` (create/edit a charge type; a system type
+can't be deactivated or deleted; a charge type with folio history, or with rates, can't be deleted; an
+unused non-system type can be deleted; rate add/edit; a rate with access history can't be deleted; Duty
+Manager can manage charge types but Front Desk cannot) — this replaces `FacilityEditDeleteTest.php`, whose
+scenarios it now covers against the new screen instead (that file was removed, since its routes no longer
+exist). `tests/Feature/FrontOffice/ChargeTypePostingTest.php` (all seven system charge types — including
+bar_outside_charge/bucareaux_charge — post successfully to a folio, proving both the validation fix and the
+ENUM-widening database fix together; a brand-new admin-added charge type can be posted immediately; an
+unknown code is rejected; a deactivated type is refused for new postings but its prior history still counts
+toward historical totals; `Folio::departmentSummary()` labels a dynamic charge type by its current name).
+`tests/Feature/FrontOffice/FacilityAccessTest.php` was rewritten against the new `charge_type_id`/
+`charge_type_rate_id` form fields, with added assertions that the underlying shadow `facility_id`/
+`facility_rate_id` are still written correctly, plus a new case proving free access is refused for a charge
+type not marked `free_for_resident_guests`. `tests/Feature/Reporting/FinancialReportTest.php` gained cases
+for the Bar Outside recognition, a brand-new charge type's department attribution, and confirming Front
+Office is correctly excluded from this mechanism.
+
+`php -l` clean on every touched/new PHP file (32 files). Blade directive/tag balance verified on every
+touched view (`finance/charge-types/index.blade.php`, `front-office/stays/show.blade.php`,
+`front-office/facility-access/index.blade.php`, `layouts/app.blade.php`, `front-office/facilities/index.blade.php`
+— the two pre-existing "`@section`/`@endsection`" and "`@canany`/`@endcanany`" count mismatches the checker
+reports are false positives already present before this round: a single-argument `@section('title', ...)`
+never needs `@endsection`, and one `@canany` appears inside a Blade comment on an unrelated line). Same
+standing limitation as every round: no `vendor/` in this sandbox, so none of this — including the new
+migrations — was actually executed against a real database. This is a schema change (the ENUM widening) in
+addition to new tables, so running `php artisan migrate` and the new test suite for real, on a copy of the
+data first, matters more than usual before treating this as verified; the Charge Types screen and the
+front-desk facility-access forms should also get a real click-through given they're new/changed UI.
+
+**One known, minor cosmetic limitation, disclosed rather than silently left**: the printed/on-screen
+financial reports (Financial report, Management report, Weekly Owner Summary, Income Statement) turn a
+charge type's raw `code` into a label with a generic `str_replace('_', ' ', ucfirst(...))` — this already
+existed before this round and reads fine for every system type and any admin type with a short, plain name
+("Rental charge"), but an auto-generated code's random suffix (added only to guarantee uniqueness — see
+`ChargeTypeService::generateCode()`) would show up verbatim in a report if the type's name were ever unusual
+enough to collide and need one appended. Not a functional defect — a future round could resolve these
+report labels from the charge type's actual `name` instead of its `code` for full polish.

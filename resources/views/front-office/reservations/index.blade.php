@@ -28,7 +28,10 @@
             @endforeach
         </select>
     </form>
-    <a href="{{ route('reservations.create') }}" class="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">+ New Reservation</a>
+    <div class="flex gap-2">
+        <a href="{{ route('reservations.create-multi') }}" class="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">+ Book Multiple Rooms</a>
+        <a href="{{ route('reservations.create') }}" class="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">+ New Reservation</a>
+    </div>
 </div>
 
 <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
@@ -39,7 +42,12 @@
         <tbody class="divide-y">
             @foreach ($reservations as $reservation)
                 <tr>
-                    <td class="p-3">{{ $reservation->reservation_number }}</td>
+                    <td class="p-3">
+                        {{ $reservation->reservation_number }}
+                        @if ($reservation->isGrouped())
+                            <span class="ml-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700" title="Booked together with other rooms in the same submission">Grouped</span>
+                        @endif
+                    </td>
                     <td class="p-3">{{ $reservation->guest->full_name }}</td>
                     <td class="p-3">{{ $reservation->check_in_date->format('d M') }} – {{ $reservation->check_out_date->format('d M Y') }}</td>
                     <td class="p-3">

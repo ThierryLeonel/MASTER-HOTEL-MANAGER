@@ -11,6 +11,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Finance\AccountingDayController;
 use App\Http\Controllers\Finance\AccountsReceivableController;
 use App\Http\Controllers\Finance\CashDisbursementController;
+use App\Http\Controllers\Finance\ChargeTypeController;
 use App\Http\Controllers\Finance\ExpenseController;
 use App\Http\Controllers\Finance\FinancialAccountController;
 use App\Http\Controllers\Finance\IncomeSourceController;
@@ -169,6 +170,12 @@ Route::middleware('auth')->group(function () {
         Route::get('/', [ReservationController::class, 'index'])->name('index');
         Route::get('/create', [ReservationController::class, 'create'])->name('create');
         Route::post('/', [ReservationController::class, 'store'])->name('store');
+        // Direct request ("book multi reservations and multi bookings
+        // instead of entering 1 by 1") — same permission as the
+        // single-room form above, one guest/party booking several rooms
+        // for the same dates in one submission.
+        Route::get('/create-multi', [ReservationController::class, 'createMulti'])->name('create-multi');
+        Route::post('/multi', [ReservationController::class, 'storeMulti'])->name('store-multi');
         Route::get('/{reservation}', [ReservationController::class, 'show'])->name('show');
         // Phase 9.5 (PHASE9_AUDIT_AND_PLAN.md §3.6): printable reservation
         // confirmation — same permission/data as show() above.
@@ -275,24 +282,34 @@ Route::middleware('auth')->group(function () {
         Route::get('/transactions/{transaction}/receipt', [FolioController::class, 'printReceipt'])->middleware('permission:manage-guests|post-folio-payment')->name('receipt.print');
     });
 
+    // Charge types (Sept 2026 unification — see ChargeType's own docblock):
+    // one admin-editable list covering bar/restaurant/front desk/rental/
+    // Gym/Pool/etc, replacing both the old hardcoded charge-type list and
+    // the separate 'facilities.*' admin screen below (retired — see that
+    // comment). 'manage-charge-types' (owner/GM/duty manager, same tier
+    // 'manage-facilities' used to be) configures the list and its rates;
+    // 'grant-facility-access' (front desk and up) still does the
+    // day-to-day granting/selling of a walk-in-payable one (Gym, Pool...).
+    Route::middleware('permission:manage-charge-types')->prefix('charge-types')->name('charge-types.')->group(function () {
+        Route::get('/', [ChargeTypeController::class, 'index'])->name('index');
+        Route::post('/', [ChargeTypeController::class, 'store'])->name('store');
+        Route::put('/{chargeType}', [ChargeTypeController::class, 'update'])->name('update');
+        Route::delete('/{chargeType}', [ChargeTypeController::class, 'destroy'])->name('destroy');
+        Route::post('/{chargeType}/rates', [ChargeTypeController::class, 'storeRate'])->name('rates.store');
+        Route::put('/rates/{rate}', [ChargeTypeController::class, 'updateRate'])->name('rates.update');
+        Route::post('/rates/{rate}/toggle', [ChargeTypeController::class, 'toggleRate'])->name('rates.toggle');
+        Route::delete('/rates/{rate}', [ChargeTypeController::class, 'destroyRate'])->name('rates.destroy');
+    });
     // Gym & Swimming Pool (post-9.8 second fix round, PHASE9_AUDIT_AND_PLAN.md
     // §20): free access for checked-in guests, paid registration/slot for
-    // walk-ins, both handled at the front desk. 'manage-facilities'
-    // (owner/GM/duty manager) configures the facilities and their rates;
-    // 'grant-facility-access' (front desk and up) does the day-to-day
-    // granting/selling.
-    Route::middleware('permission:manage-facilities')->prefix('facilities')->name('facilities.')->group(function () {
-        Route::get('/', [FacilityController::class, 'index'])->name('index');
-        Route::post('/', [FacilityController::class, 'store'])->name('store');
-        // Broader "edit/delete every category and input" request — see
-        // FacilityController::update()/destroy()/updateRate()/destroyRate().
-        Route::put('/{facility}', [FacilityController::class, 'update'])->name('update');
-        Route::delete('/{facility}', [FacilityController::class, 'destroy'])->name('destroy');
-        Route::post('/{facility}/rates', [FacilityController::class, 'storeRate'])->name('rates.store');
-        Route::put('/rates/{rate}', [FacilityController::class, 'updateRate'])->name('rates.update');
-        Route::post('/rates/{rate}/toggle', [FacilityController::class, 'toggleRate'])->name('rates.toggle');
-        Route::delete('/rates/{rate}', [FacilityController::class, 'destroyRate'])->name('rates.destroy');
-    });
+    // walk-ins, both handled at the front desk. Its own admin screen
+    // ('facilities.*', FacilityController) is retired now that Charge
+    // Types above covers the same ground for every charge, Gym/Pool
+    // included — the underlying Facility/FacilityRate tables and
+    // FacilityController class are untouched (still quietly written to
+    // underneath Charge Types — see ChargeTypeService's own docblock) so
+    // nothing about existing data changes, only where an admin configures
+    // it from.
     Route::middleware('permission:grant-facility-access')->prefix('facility-access')->name('facility-access.')->group(function () {
         Route::get('/', [FacilityAccessController::class, 'index'])->name('index');
         Route::post('/guest', [FacilityAccessController::class, 'grantForGuest'])->name('guest');

@@ -122,8 +122,25 @@ class RolesAndPermissionsSeeder extends Seeder
         // grants free access to checked-in guests and sells paid access
         // (gym registration / a pool slot) to walk-ins; 'manage-facilities'
         // is the separate, higher permission for configuring the
-        // facilities and their rates.
+        // facilities and their rates. Kept defined (and still granted
+        // below, unchanged) even though the admin screen it used to gate
+        // is now 'manage-charge-types' — see that permission's own
+        // comment — purely so nothing that might still reference the old
+        // name breaks; no route uses it any more.
         'grant-facility-access', 'manage-facilities',
+        // Direct request (Sept 2026, "normally we have bar charge,
+        // restaurant charge, frontdesk charge, rental charge, pool fee,
+        // Gym Fee, etc include all connect them... just build it in such
+        // a way i can edit and or just add or delete"): one unified,
+        // fully editable list of everything that can be charged to a
+        // guest's folio and/or sold on the spot (replacing the old fixed
+        // 5-type list AND absorbing Gym/Pool's separate 'manage-facilities'
+        // configuration screen into the same place) — see the ChargeType
+        // model and ChargeTypeController. Granted to exactly the same
+        // three roles that held 'manage-facilities' before this
+        // (Owner/General Manager automatically via $all below; Duty
+        // Manager explicitly, alongside it, further down).
+        'manage-charge-types',
         // Financial accounts & client debt (third post-9.8 fix round,
         // PHASE9_AUDIT_AND_PLAN.md §21-22): 'manage-financial-accounts'
         // configures the Cash/Bank/MTN/Orange (etc.) account list and
@@ -300,7 +317,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 // Fourth post-9.8 fix round: 'manage-own-shift' removed —
                 // Duty Manager still holds 'view-shift-reports' below, so
                 // reviewing every department's shifts is unaffected.
-                'view-shift-reports', 'grant-facility-access', 'manage-facilities',
+                'view-shift-reports', 'grant-facility-access', 'manage-facilities', 'manage-charge-types',
                 'manage-accounts-receivable',
                 // Sixth post-9.8 fix round ("the accountant, manager,
                 // should have the right to create new account and or

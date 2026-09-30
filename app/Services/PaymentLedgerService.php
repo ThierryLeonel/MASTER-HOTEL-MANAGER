@@ -121,6 +121,13 @@ class PaymentLedgerService
         // received) or any ledger total. See this column's migration.
         ?float $discountAmount = null,
         ?string $discountReason = null,
+        // Direct request (Sept 2026 refinement of the revenue-recognition
+        // fix): "the place in the payment form that request on who
+        // handed the sales should either be the department or a textbox
+        // that receive the name of the person handing." Purely
+        // informational, independent of `$departmentId` — see
+        // `payments.handed_over_by`'s migration for the full reasoning.
+        ?string $handedOverBy = null,
     ): Payment {
         // Correction round (audited defect #32): a caller worried about a
         // retried submission (double-click, network retry on a deposit or
@@ -191,6 +198,7 @@ class PaymentLedgerService
                 'financial_account_id' => $financialAccountId ?? $this->defaultFinancialAccountId($method),
                 'source_module' => $sourceModule,
                 'department_id' => $resolvedDepartmentId,
+                'handed_over_by' => $handedOverBy,
                 'source_reference' => $sourceReference,
                 'reference_type' => $reference?->getMorphClass(),
                 'reference_id' => $reference?->getKey(),

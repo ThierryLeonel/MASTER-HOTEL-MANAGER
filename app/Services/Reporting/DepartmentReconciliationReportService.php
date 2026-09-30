@@ -2,6 +2,7 @@
 
 namespace App\Services\Reporting;
 
+use App\Models\ChargeType;
 use App\Models\Department;
 use App\Models\FolioTransaction;
 use App\Models\Order;
@@ -153,20 +154,32 @@ class DepartmentReconciliationReportService
      * Bar/Restaurant/Bar-Outside/Bucareaux order deferred to a guest's room
      * folio used to be counted twice in forRange()'s totals — once here as
      * that outlet's own `sales` (every closed Order, deferred or not), and
-     * a second time as Front Office `sales` (which summed EVERY
+     * a second time as Front Office `sales` (which used to sum EVERY
      * FolioTransaction::CHARGE_TYPES, including the bar_charge/
      * restaurant_charge rows those same deferred orders post). Front
-     * Office's own genuine sales are only room lodging, front-desk petty
-     * sales, and other_service — never another outlet's charge types,
-     * which only ever appear on a folio because that outlet chose to defer
-     * them, not because Front Office sold anything.
+     * Office's own genuine sales are only its own charge types — never
+     * another outlet's, which only ever appear on a folio because that
+     * outlet chose to defer them, not because Front Office sold anything.
+     *
+     * Charge-types unification (Sept 2026): this used to be a hardcoded
+     * `FRONT_OFFICE_OWN_CHARGE_TYPES = ['room_charge', 'front_desk_charge',
+     * 'other_service']` list. Now that a charge type's department is an
+     * admin setting (`charge_types.department_id`) rather than a code
+     * constant, "Front Office's own charge types" is read live from
+     * whichever charge types are actually assigned to this department —
+     * so a new type like "Rental Charge," once an admin assigns it to
+     * Front Desk, is correctly folded in here with no further code
+     * changes, exactly as much as room_charge/front_desk_charge/
+     * other_service already are.
      */
-    private const FRONT_OFFICE_OWN_CHARGE_TYPES = ['room_charge', 'front_desk_charge', 'other_service'];
-
     private function salesFor(Department $department, array $range): float
     {
         if ($department->code === 'FO') {
-            return (float) FolioTransaction::whereIn('type', self::FRONT_OFFICE_OWN_CHARGE_TYPES)
+            $ownChargeTypes = ChargeType::where('department_id', $department->id)
+                ->where('postable_to_folio', true)
+                ->pluck('code');
+
+            return (float) FolioTransaction::whereIn('type', $ownChargeTypes)
                 ->whereNull('voided_at')
                 ->whereBetween('transaction_date', $range)
                 ->sum('amount');

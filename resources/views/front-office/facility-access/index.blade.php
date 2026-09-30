@@ -34,13 +34,19 @@
     </div>
 
     <div class="lg:col-span-1 space-y-6 hms-side-panel">
+        {{-- Charge-types unification (Sept 2026): both forms below now
+             list every walk-in-payable Charge Type (managed from Finance >
+             Charge Types) instead of a fixed Facility list — Gym/Pool are
+             simply two entries in that same list now, alongside anything
+             else an admin marks walk-in payable and free for resident
+             guests. --}}
         <form method="POST" action="{{ route('facility-access.guest') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             @csrf
             <div class="text-xs font-medium">Free access — checked-in guest</div>
-            <select name="facility_id" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            <select name="charge_type_id" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
                 <option value="">Facility…</option>
-                @foreach ($facilities as $facility)
-                    <option value="{{ $facility->id }}">{{ $facility->name }}</option>
+                @foreach ($chargeTypes->where('free_for_resident_guests', true) as $chargeType)
+                    <option value="{{ $chargeType->id }}">{{ $chargeType->name }}</option>
                 @endforeach
             </select>
             <select name="stay_id" required class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
@@ -55,16 +61,16 @@
         <form method="POST" action="{{ route('facility-access.walk-in') }}" class="rounded-lg bg-white p-4 shadow-sm space-y-2">
             @csrf
             <div class="text-xs font-medium">Sell access — walk-in</div>
-            <select name="facility_id" required onchange="showRates(this)" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            <select name="charge_type_id" required onchange="showRates(this)" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
                 <option value="">Facility…</option>
-                @foreach ($facilities as $facility)
-                    <option value="{{ $facility->id }}">{{ $facility->name }}</option>
+                @foreach ($chargeTypes as $chargeType)
+                    <option value="{{ $chargeType->id }}">{{ $chargeType->name }}</option>
                 @endforeach
             </select>
-            @foreach ($facilities as $facility)
-                <select name="facility_rate_id" data-facility="{{ $facility->id }}" class="rate-select hidden w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            @foreach ($chargeTypes as $chargeType)
+                <select name="charge_type_rate_id" data-charge-type="{{ $chargeType->id }}" class="rate-select hidden w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
                     <option value="">Rate…</option>
-                    @foreach ($facility->rates as $rate)
+                    @foreach ($chargeType->rates as $rate)
                         <option value="{{ $rate->id }}">{{ $rate->name }} — {{ number_format($rate->amount, 0) }} XAF</option>
                     @endforeach
                 </select>
@@ -85,7 +91,7 @@
 <script>
 function showRates(select) {
     document.querySelectorAll('.rate-select').forEach(el => {
-        const isMatch = el.dataset.facility === select.value;
+        const isMatch = el.dataset.chargeType === select.value;
         el.classList.toggle('hidden', !isMatch);
         el.required = isMatch;
         if (!isMatch) el.value = '';
