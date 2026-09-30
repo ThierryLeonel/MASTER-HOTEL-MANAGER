@@ -68,7 +68,7 @@
                     </td>
                     <td class="p-3">
                         @if (! $payment->isVoided())
-                            <form method="POST" action="{{ route('transactions.void', $payment) }}" onsubmit="return promptVoidReason(this)" class="inline">
+                            <form method="POST" action="{{ route('finance.transactions.void', $payment) }}" onsubmit="return promptVoidReason(this)" class="inline">
                                 @csrf
                                 <input type="hidden" name="reason" value="">
                                 <button type="submit" class="text-red-600 hover:underline text-xs">Void</button>

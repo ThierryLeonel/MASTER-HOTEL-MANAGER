@@ -578,6 +578,69 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Screenshot-review fixes: revenue recognition for Bar/Restaurant, shift-variance notes, a 500 error, ADR/RevPAR labels, and a guest-history shortcut (`CORRECTION_ROUND_34_DELIVERY.md` §18-22)**
+- **All Transactions 500 error, fixed** — a hardcoded route name in the view didn't match its actual
+  registered (nested) name; the page threw the instant it had a real row to render (§18).
+- **ADR & RevPAR now show their full names** — "Average Daily Rate" / "Revenue Per Available Room" —
+  alongside the acronym on every screen and printable report that shows them (§19).
+- **A shift can no longer close with an unexplained cash variance** — direct request: "before the closure
+  any shift if there is any variance, the person in shift must explain with a note." Enforced in
+  `ShiftService::close()` itself (a friendly flashed error, not a raw failure), with the close-shift form
+  now prompting for the explanation the moment a declared amount disagrees with the live expected figure
+  (§20).
+- **Direct "Guest history" link from the Active Stays list** — no more needing to find a guest's own
+  profile first; the existing, already-permission-gated Guest Transaction History screen is now one click
+  away from the stay itself (§21).
+- **Manually-recorded Bar/Restaurant income is now recognised as real department revenue** — direct
+  request: since Bar and Restaurant have no POS device yet, their staff hand their full day's takings to the
+  accountant, who records it on the general payment screen; that money only ever showed up as generic
+  "other income" before, never as real Bar/Restaurant revenue on the Financial Report, KPI Dashboard,
+  Income Statement, Weekly Owner Summary, or Department Payment Reconciliation report. The payment screen
+  can now explicitly say which outlet department a handover belongs to, and every one of those reports now
+  recognises it correctly — counted exactly once, never fabricated as a POS order, and never retroactively
+  reclassifying anything already recorded (§22).
+
+**Deploy fix: a second Laravel Cloud deployment failed on a missing `bootstrap/cache` directory (`CORRECTION_ROUND_34_DELIVERY.md` §17)**
+- Root cause was a packaging mistake on my side, not a codebase bug: the delivery zip's build command used
+  an overly broad exclude pattern (`-x "*.git*"`) that unintentionally stripped every `.gitignore`
+  placeholder file project-wide — including the ones that keep `bootstrap/cache/` and several `storage/`
+  subdirectories present in a git checkout or zip extraction, since git cannot track an empty directory on
+  its own. Fixed by removing the redundant exclude flag and rebuilding the zip with all 12 placeholders
+  restored (§17).
+
+**Deploy fix: a fresh MySQL database failed on `financial_account_reconciliations`'s composite index (`CORRECTION_ROUND_34_DELIVERY.md` §16)**
+- Reported from a real Laravel Cloud first deploy for a new hotel/site: `php artisan migrate --force` failed
+  with `SQLSTATE[42000]... Identifier name '...' is too long`. Root cause: an unnamed composite index whose
+  auto-generated name (76 characters) exceeds MySQL's 64-character identifier limit — never caught before
+  because every prior deploy either already had the table or ran on Postgres, which truncates instead of
+  erroring. Fixed with an explicit short index name, and the migration now safely repairs the exact
+  half-finished state (table created, index missing) that failure leaves behind — redeploying this code is
+  enough, no manual database changes needed. Every other migration in the project was scanned for the same
+  class of bug; nothing else was over the limit (§16).
+
+**The income-source list is now managed, not fixed — accountant/GM can create/update, only Owner can delete (`CORRECTION_ROUND_34_DELIVERY.md` §15)**
+- Direct request, a fast follow-up to the dropdown just below: "the list should not be fixed the
+  accountant, or finance officer (update, create) and the [owner] should be able to update, create and
+  delete it." The 9-item starter list moved from a hardcoded PHP constant into a proper managed table
+  (`income_sources` / `IncomeSource`) with its own screen (Finance → Income Sources, linked straight from
+  the payment screen's dropdown). Accountant and General Manager can add or rename entries
+  (`manage-income-sources`); only the Owner can delete one (`delete-income-sources`) — the same
+  "delete is more destructive, so it's Owner-only" split already used for deleting a user or voiding a
+  transaction. Deleting an entry never touches a payment already recorded under that name — see §15 for why
+  that's safe (§15).
+
+**Income source on the general payment screen is now a dropdown (`CORRECTION_ROUND_34_DELIVERY.md` §14)**
+- Direct request: "let the income source be a dropdown of the income sources if other then state... identify
+  all the income sources." Replaced the free-text "Income source" field on the general "record a payment"
+  screen with a `<select>` built from a fixed, self-identified list of genuinely ad-hoc income categories
+  (`Payment::INCOME_SOURCES` — rent, event hall hire, guest advance, commission, damage/breakage, lost and
+  found, sponsorship/advertising, sale of scrap, miscellaneous), scoped to exclude income already tracked
+  through its own dedicated flow elsewhere (room/folio charges, POS sales, gym/pool facility access,
+  reservation deposits). An "Other (please state)" option reveals a free-text field for anything not
+  listed. No schema change and no stricter server-side validation — `income_source` stays the same free-text
+  column and requirement it already was, so every value the dropdown can submit still passes, and every
+  value already in the database still displays correctly (§14).
+
 **Owner can void (never edit-in-place) any transaction; payments can record a discount (`CORRECTION_ROUND_34_DELIVERY.md` §12–13)**
 - Direct request: "the owner is suppose to be able to edit all transaction[s]." This system has no in-place
   edit for any posted transaction, for any role — and rewriting a posted amount would violate this

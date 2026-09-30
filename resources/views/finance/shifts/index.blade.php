@@ -48,7 +48,8 @@
                                         <form method="POST" action="{{ route('finance.shifts.close', $shift) }}" onsubmit="return promptDeclaredCash(this)" class="inline">
                                             @csrf
                                             <input type="hidden" name="declared_cash" value="">
-                                            <button class="text-xs text-green-700 hover:underline">Close &amp; declare cash</button>
+                                            <input type="hidden" name="notes" value="">
+                                            <button class="text-xs text-green-700 hover:underline" data-shift-id="{{ $shift->id }}">Close &amp; declare cash</button>
                                         </form>
                                     @endcan
                                 @else
@@ -103,6 +104,28 @@ function promptDeclaredCash(form) {
     const amount = prompt('Cash counted and being handed in for this shift (XAF):');
     if (amount === null || amount.trim() === '' || isNaN(parseFloat(amount))) return false;
     form.declared_cash.value = amount;
+
+    // Direct request ("before the closure any shift if there is any
+    // variance, the person in shift must explain with a note"): read the
+    // expected cash already shown live on this row (the poll below) and,
+    // if the declared amount differs from it, ask for an explanation
+    // before submitting — a smoother first attempt at the same rule
+    // ShiftService::close() enforces server-side regardless, in case this
+    // figure hasn't loaded yet or the two still disagree for some other
+    // reason.
+    const row = form.closest('tr');
+    const expectedSpan = row ? row.querySelector('.live-expected-cash') : null;
+    const expectedText = expectedSpan ? expectedSpan.textContent.replace(/[^0-9.-]/g, '') : '';
+    const expected = expectedText ? parseFloat(expectedText) : NaN;
+    const declared = parseFloat(amount);
+
+    if (!isNaN(expected) && Math.round((declared - expected) * 100) !== 0) {
+        const variance = (declared - expected).toLocaleString();
+        const note = prompt(`This is ${variance} XAF off the expected amount (${expected.toLocaleString()}). Please explain the variance before closing this shift:`);
+        if (!note || !note.trim()) return false;
+        form.notes.value = note;
+    }
+
     return true;
 }
 

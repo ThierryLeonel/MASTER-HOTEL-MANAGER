@@ -8,8 +8,8 @@
 <table class="w-full text-sm mb-4">
     <tbody class="divide-y">
         <tr><td class="py-2 text-slate-500">Occupancy rate</td><td class="py-2 text-right">{{ $kpis['occupancy_rate'] }}%</td></tr>
-        <tr><td class="py-2 text-slate-500">ADR</td><td class="py-2 text-right">{{ number_format($kpis['adr'], 0) }}</td></tr>
-        <tr><td class="py-2 text-slate-500">RevPAR</td><td class="py-2 text-right">{{ number_format($kpis['revpar'], 0) }}</td></tr>
+        <tr><td class="py-2 text-slate-500">ADR (Average Daily Rate)</td><td class="py-2 text-right">{{ number_format($kpis['adr'], 0) }}</td></tr>
+        <tr><td class="py-2 text-slate-500">RevPAR (Revenue Per Available Room)</td><td class="py-2 text-right">{{ number_format($kpis['revpar'], 0) }}</td></tr>
         <tr><td class="py-2 text-slate-500">Revenue (accrual)</td><td class="py-2 text-right">{{ number_format($kpis['total_revenue'], 0) }}</td></tr>
         <tr><td class="py-2 text-slate-500">Expenses paid</td><td class="py-2 text-right">{{ number_format($kpis['total_expenses_paid'], 0) }}</td></tr>
         <tr><td class="py-2 text-slate-500">Cash in</td><td class="py-2 text-right">{{ number_format($kpis['cash_in'], 0) }}</td></tr>

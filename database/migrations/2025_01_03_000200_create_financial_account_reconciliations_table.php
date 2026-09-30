@@ -40,12 +40,51 @@ use Illuminate\Support\Facades\Schema;
  * "call to undefined method" error instead of fixing anything. The
  * `Schema::hasTable()` guard below is the real, documented way to make a
  * `Schema::create()` migration idempotent.)
+ *
+ * Fix, first fresh-MySQL-database deploy for a new hotel/site: this
+ * migration's composite index used to rely on Laravel's auto-generated
+ * name — 'financial_account_reconciliations_financial_account_id_
+ * reconciled_at_index', 76 characters — which is over MySQL's hard
+ * 64-character identifier limit (SQLSTATE[42000] error 1059). That never
+ * surfaced before because every prior deploy either already had this
+ * table (the `Schema::hasTable()` guard below returned before ever
+ * reaching the index) or ran on a database (Postgres, in this project's
+ * own earlier verification) that silently truncates an over-long
+ * identifier instead of erroring. A genuinely fresh MySQL database is the
+ * first case that actually executes this CREATE TABLE for real — and
+ * because MySQL auto-commits DDL (no transactional CREATE TABLE/ALTER
+ * TABLE the way most single-statement data changes are), the failure
+ * left a real, specific half-finished state behind: the table itself
+ * WAS created (that statement succeeded), but the immediately-following
+ * `ALTER TABLE ... ADD INDEX` failed and rolled back nothing since there
+ * was nothing transactional to roll back — and because the whole
+ * migration's `up()` threw, Laravel never got to record this migration
+ * as run. A plain retry of `php artisan migrate --force` would hit
+ * `Schema::hasTable()` returning true from that already-created table,
+ * `return` immediately (correct behavior in the ordinary case this guard
+ * was written for), and quietly leave that specific database missing
+ * this index forever. The `else` branch below exists specifically for
+ * that one scenario: add the (now short, explicit) index only if a table
+ * that already exists doesn't have it yet, changing nothing on a
+ * database where this migration already completed cleanly the first
+ * time.
  */
 return new class extends Migration
 {
+    private const INDEX_NAME = 'far_account_reconciled_at_idx';
+
     public function up(): void
     {
         if (Schema::hasTable('financial_account_reconciliations')) {
+            $hasIndex = collect(Schema::getIndexes('financial_account_reconciliations'))
+                ->contains(fn (array $index) => $index['name'] === self::INDEX_NAME);
+
+            if (! $hasIndex) {
+                Schema::table('financial_account_reconciliations', function (Blueprint $table) {
+                    $table->index(['financial_account_id', 'reconciled_at'], self::INDEX_NAME);
+                });
+            }
+
             return;
         }
 
@@ -61,7 +100,10 @@ return new class extends Migration
             $table->text('notes')->nullable();
             $table->timestamps();
 
-            $table->index(['financial_account_id', 'reconciled_at']);
+            // Explicit short name — see this migration's own docblock for
+            // why this can't be left to Laravel's default auto-generated
+            // name.
+            $table->index(['financial_account_id', 'reconciled_at'], self::INDEX_NAME);
         });
     }
 

@@ -71,11 +71,69 @@ class ShiftTest extends TestCase
             'notes' => 'Visitor payment',
         ]);
 
+        // Direct request ("before the closure any shift if there is any
+        // variance, the person in shift must explain with a note") — a
+        // shortage/overage can no longer close without one, see the tests
+        // below for the rejection itself.
         $this->actingAs($frontDesk)->post(route('finance.shifts.close', $shift), [
             'declared_cash' => 9000,
+            'notes' => 'Gave a customer change from the wrong denomination twice.',
         ]);
 
         $this->assertSame('-1000.00', $shift->fresh()->variance);
+    }
+
+    /**
+     * Direct request ("before the closure any shift if there is any
+     * variance, the person in shift must explain with a note") —
+     * enforced in ShiftService::close() itself, not just the form, so it
+     * holds regardless of entry point.
+     */
+    public function test_closing_a_shift_with_a_variance_and_no_note_is_rejected(): void
+    {
+        $fo = Department::where('code', 'FO')->first();
+        $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0]);
+        $shift = Shift::first();
+
+        $this->actingAs($frontDesk)->post(route('payments.store'), [
+            'amount' => 10000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Visitor payment',
+        ]);
+
+        $response = $this->actingAs($frontDesk)->post(route('finance.shifts.close', $shift), [
+            'declared_cash' => 9000,
+        ]);
+
+        $response->assertSessionHasErrors('error');
+        $this->assertSame('open', $shift->fresh()->status, 'A shift with an unexplained variance must not actually close.');
+    }
+
+    /**
+     * A shift that balances exactly still needs no explanation — the rule
+     * is specifically about a variance, not about every close.
+     */
+    public function test_closing_a_shift_with_zero_variance_and_no_note_still_works(): void
+    {
+        $fo = Department::where('code', 'FO')->first();
+        $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0]);
+        $shift = Shift::first();
+
+        $this->actingAs($frontDesk)->post(route('payments.store'), [
+            'amount' => 10000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Visitor payment',
+        ]);
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.close', $shift), [
+            'declared_cash' => 10000,
+        ])->assertRedirect();
+
+        $this->assertSame('closed', $shift->fresh()->status);
     }
 
     /**

@@ -19,7 +19,23 @@
                     <td class="p-3">{{ $stay->check_in_at->format('d M Y H:i') }}</td>
                     <td class="p-3">{{ $stay->expected_check_out_date->format('d M Y') }}</td>
                     <td class="p-3">{{ number_format($stay->folio->balance ?? 0, 0) }} XAF</td>
-                    <td class="p-3"><a href="{{ route('stays.show', $stay) }}" class="text-slate-600 hover:underline">Open folio</a></td>
+                    <td class="p-3 whitespace-nowrap">
+                        <a href="{{ route('stays.show', $stay) }}" class="text-slate-600 hover:underline">Open folio</a>
+                        {{--
+                            Direct request ("let there be a direct button to
+                            see specific guest history in the active stay"):
+                            a straight shortcut to that guest's full
+                            cross-stay transaction history, instead of
+                            having to leave this screen and search for them
+                            again on the Guest History report. Gated the
+                            same way the report itself is — a role that
+                            can't open the report shouldn't see a dead link
+                            to it here either.
+                        --}}
+                        @can('view-guest-history')
+                            <a href="{{ route('guest-transaction-history.show', $stay->guest) }}" class="ml-2 text-blue-700 hover:underline">Guest history</a>
+                        @endcan
+                    </td>
                 </tr>
             @empty
                 <tr><td class="p-3 text-slate-500" colspan="6">No active stays.</td></tr>

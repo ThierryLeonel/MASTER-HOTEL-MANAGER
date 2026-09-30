@@ -37,18 +37,69 @@
                     <input type="text" name="notes" required placeholder="e.g. Room rent, event hall hire…" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium mb-1">Income source</label>
+                    <label class="block text-sm font-medium mb-1">This is sales handed over by (optional)</label>
+                    {{--
+                        Direct request ("the income payment recorded by the
+                        accountant is not completely recognised as income...
+                        because the bar and the restaurant are not having
+                        their own device at the moment so they pay their
+                        total amount sold to the accountant and he
+                        reconciles them"): choosing a department here is
+                        what tells the reports this money is that
+                        department's own sales, not a generic "other
+                        income" line — see FinancialReportService::
+                        revenueByChargeType()'s docblock. Leave this on
+                        "None" for anything that really is general/rent/
+                        visitor income; it is NOT required.
+                    --}}
+                    <select name="department_id" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                        <option value="">None — general income (default)</option>
+                        @foreach ($attributableDepartments as $department)
+                            <option value="{{ $department->id }}">{{ $department->name }} sales handover</option>
+                        @endforeach
+                    </select>
+                    <p class="mt-1 text-xs text-slate-500">Choose this when the amount is a department's total takings handed over because it has no payment device of its own — it will then show up as that department's real revenue in the reports, not as generic income.</p>
+                </div>
+                <div>
+                    <div class="mb-1 flex items-center justify-between">
+                        <label class="block text-sm font-medium">Income source</label>
+                        {{--
+                            Follow-up request ("the list should not be
+                            fixed... the accountant, or finance officer
+                            [create/update], and [the owner should be able
+                            to] update, create and delete it"): a link
+                            straight to the managed list, shown only to
+                            whoever can actually change it.
+                        --}}
+                        @can('manage-income-sources')
+                            <a href="{{ route('finance.income-sources.index') }}" class="btn-action text-xs text-blue-700 hover:underline">Manage list</a>
+                        @endcan
+                    </div>
                     {{--
                         Direct request ("all in payment must be attached to
                         an income source that is to be represented ... in
-                        the income statement"): every payment recorded on
-                        this screen is incoming money, so it must say what
-                        kind of income it is. Free text, same convention as
-                        an expense's category — shows up on the Income
-                        Statement under Revenue, grouped by exactly what's
-                        typed here.
+                        the income statement"), refined by a follow-up
+                        request ("let the income source be a dropdown of
+                        the income sources if other then state"): a
+                        managed list (see the IncomeSource model) keeps
+                        this consistent for reporting, with an "Other"
+                        option that reveals a free-text field for anything
+                        not listed — that text is what actually gets saved
+                        to the `income_source` column, same as before.
+                        Shows up on the Income Statement under Revenue,
+                        grouped by whatever ends up stored here.
                     --}}
-                    <input type="text" name="income_source" required placeholder="e.g. Rent, Event hall hire, Commission" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                    <select name="income_source" id="income_source" required onchange="document.getElementById('income_source_other_wrap').classList.toggle('hidden', this.value !== '__other__')" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                        <option value="">Choose an income source…</option>
+                        @foreach ($incomeSources as $source)
+                            <option value="{{ $source->name }}">{{ $source->name }}</option>
+                        @endforeach
+                        <option value="__other__">Other (please state)</option>
+                    </select>
+                    <div id="income_source_other_wrap" class="hidden mt-2">
+                        <label class="block text-xs font-medium mb-1">State the income source</label>
+                        <input type="text" name="income_source_other" id="income_source_other" placeholder="e.g. Vending machine income" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                    </div>
                 </div>
                 <div>
                     <label class="flex items-center gap-2 text-xs text-slate-600">
@@ -84,7 +135,7 @@
         <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
             <table class="w-full text-sm">
                 <thead class="bg-slate-100 text-left text-xs uppercase text-slate-500">
-                    <tr><th class="p-3">Date</th><th class="p-3">Payment #</th><th class="p-3">Guest / payer</th><th class="p-3">Income source</th><th class="p-3">Account</th><th class="p-3 text-right">Amount</th><th class="p-3">By</th></tr>
+                    <tr><th class="p-3">Date</th><th class="p-3">Payment #</th><th class="p-3">Guest / payer</th><th class="p-3">Income source</th><th class="p-3">Department</th><th class="p-3">Account</th><th class="p-3 text-right">Amount</th><th class="p-3">By</th></tr>
                 </thead>
                 <tbody class="divide-y">
                     @forelse ($payments as $payment)
@@ -93,6 +144,13 @@
                             <td class="p-3">{{ $payment->payment_number }}</td>
                             <td class="p-3">{{ $payment->guest->full_name ?? $payment->notes }}</td>
                             <td class="p-3">{{ $payment->income_source ?? '—' }}</td>
+                            <td class="p-3">
+                                @if ($payment->department && $payment->department->code !== 'FO')
+                                    <span class="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-800">{{ $payment->department->name }}</span>
+                                @else
+                                    <span class="text-slate-400">—</span>
+                                @endif
+                            </td>
                             <td class="p-3">{{ $payment->financialAccount->name ?? str_replace('_', ' ', ucfirst($payment->method)) }}</td>
                             <td class="p-3 text-right">
                                 {{ number_format($payment->amount, 0) }} XAF
@@ -105,7 +163,7 @@
                             <td class="p-3">{{ $payment->recordedBy->name }}</td>
                         </tr>
                     @empty
-                        <tr><td class="p-3 text-slate-500" colspan="7">No payments recorded yet.</td></tr>
+                        <tr><td class="p-3 text-slate-500" colspan="8">No payments recorded yet.</td></tr>
                     @endforelse
                 </tbody>
             </table>

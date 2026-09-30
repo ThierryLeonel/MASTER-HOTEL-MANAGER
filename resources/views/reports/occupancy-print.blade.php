@@ -8,8 +8,8 @@
 <table class="w-full text-sm mb-6">
     <tbody class="divide-y">
         <tr><td class="py-2 text-slate-500">Occupancy rate</td><td class="py-2 text-right">{{ $occupancy['occupancy_rate'] }}% ({{ $occupancy['room_nights_occupied'] }} / {{ $occupancy['room_nights_available'] }} room-nights)</td></tr>
-        <tr><td class="py-2 text-slate-500">ADR</td><td class="py-2 text-right">{{ number_format($occupancy['adr'], 0) }}</td></tr>
-        <tr><td class="py-2 text-slate-500">RevPAR</td><td class="py-2 text-right">{{ number_format($occupancy['revpar'], 0) }}</td></tr>
+        <tr><td class="py-2 text-slate-500">ADR (Average Daily Rate)</td><td class="py-2 text-right">{{ number_format($occupancy['adr'], 0) }}</td></tr>
+        <tr><td class="py-2 text-slate-500">RevPAR (Revenue Per Available Room)</td><td class="py-2 text-right">{{ number_format($occupancy['revpar'], 0) }}</td></tr>
         <tr><td class="py-2 text-slate-500">Total rooms</td><td class="py-2 text-right">{{ $occupancy['total_rooms'] }}</td></tr>
     </tbody>
 </table>

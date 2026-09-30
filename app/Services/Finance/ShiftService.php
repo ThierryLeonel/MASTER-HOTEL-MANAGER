@@ -173,6 +173,24 @@ class ShiftService
             $expected = $this->expectedCashFor($locked);
             $variance = round($declaredCash - $expected, 2);
 
+            // Direct request ("before the closure any shift if there is
+            // any variance, the person in shift must explain with a
+            // note"): enforced here, not only in the form — the real gate
+            // has to live where every close() call actually goes through,
+            // the same reasoning every other business-rule check in this
+            // class already follows. A note attached to a shift that
+            // balanced exactly is still optional; only an actual
+            // discrepancy between what was expected and what was declared
+            // requires staff to say why.
+            if ($variance !== 0.0 && trim((string) $notes) === '') {
+                throw new HmsException(sprintf(
+                    'There is a variance of %s XAF between the expected (%s) and declared (%s) cash — please explain it in the notes before this shift can close.',
+                    number_format($variance, 0),
+                    number_format($expected, 0),
+                    number_format($declaredCash, 0),
+                ));
+            }
+
             $locked->update([
                 'closed_by' => $actor->id,
                 'closed_at' => $locked->closed_at,

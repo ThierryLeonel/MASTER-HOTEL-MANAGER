@@ -24,7 +24,7 @@
         This week the hotel ran at
         <strong>{{ $occupancy['occupancy_rate'] }}% occupancy</strong>
         ({{ $occupancy['room_nights_occupied'] }} of {{ $occupancy['room_nights_available'] }} room-nights sold),
-        with an ADR of {{ number_format($occupancy['adr'], 0) }} XAF and RevPAR of {{ number_format($occupancy['revpar'], 0) }} XAF.
+        with an ADR (Average Daily Rate) of {{ number_format($occupancy['adr'], 0) }} XAF and RevPAR (Revenue Per Available Room) of {{ number_format($occupancy['revpar'], 0) }} XAF.
         Total revenue (guest folio charges plus other recorded income) was <strong>{{ number_format($statement['total_revenue'], 0) }} XAF</strong>,
         against <strong>{{ number_format($statement['total_expenses'], 0) }} XAF</strong> in expenses,
         for a net operating result of

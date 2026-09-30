@@ -212,6 +212,26 @@ class RolesAndPermissionsSeeder extends Seeder
         // 'manage-system-data'/'edit-room-details'/'delete-users' above
         // — excluded from General Manager's $all grant below.
         'void-transactions',
+        // Direct request, fast follow-up to the income-source dropdown
+        // ("the list should not be fixed... the accountant, or finance
+        // officer [should be able to] update, create [it]"): managing the
+        // `income_sources` list itself (as opposed to just picking one on
+        // the payment screen, which only ever needed 'record-payment').
+        // Held by Owner (via $all), General Manager (via $all, not
+        // excluded below), and Accountant (granted explicitly below) —
+        // "finance officer" in the request maps onto this system's
+        // existing 'accountant' role; no separate role exists or was
+        // asked for.
+        'manage-income-sources',
+        // Direct request, same follow-up ("[the owner] should be able to
+        // update, create and delete it"): deleting an income source is
+        // strictly more destructive than adding/renaming one (see
+        // IncomeSourceService::delete()'s own docblock for why it's a
+        // real, permanent delete, not a deactivate), so it gets its own
+        // permission, Owner-only exactly like 'delete-users'/
+        // 'void-transactions' above — excluded from General Manager's
+        // $all grant below.
+        'delete-income-sources',
     ];
 
     public function run(): void
@@ -261,7 +281,11 @@ class RolesAndPermissionsSeeder extends Seeder
             // that permission's own comment in PERMISSIONS above.
             // 'edit-room-details' is Owner-only on request, same as
             // 'manage-system-data' — see its comment in PERMISSIONS.
-            'general_manager' => array_values(array_diff($all, ['manage-own-shift', 'manage-system-data', 'edit-room-details', 'delete-users', 'void-transactions'])),
+            // 'delete-income-sources' is Owner-only on request, same as
+            // 'delete-users'/'void-transactions' — see that permission's
+            // own comment in PERMISSIONS. General Manager still gets
+            // 'manage-income-sources' (create/update) via $all, unaffected.
+            'general_manager' => array_values(array_diff($all, ['manage-own-shift', 'manage-system-data', 'edit-room-details', 'delete-users', 'void-transactions', 'delete-income-sources'])),
             'duty_manager' => [
                 'approve-reservation', 'manage-reservations', 'manage-guests',
                 'view-rooms', 'manage-rooms', 'update-room-status', 'checkin-guest', 'checkout-guest',
@@ -388,6 +412,12 @@ class RolesAndPermissionsSeeder extends Seeder
                 // accountant, even though recording that kind of income is
                 // squarely accountant work.
                 'record-payment',
+                // Direct request, fast follow-up ("the accountant, or
+                // finance officer [should be able to] update, create
+                // [the income source list]") — create/update only;
+                // 'delete-income-sources' stays Owner-only (see that
+                // permission's own comment in PERMISSIONS).
+                'manage-income-sources',
                 // Feature 2 (consolidated guest transaction history):
                 // Manager/Duty Manager/Accountant/Marketing Manager/Owner
                 // only, per spec.

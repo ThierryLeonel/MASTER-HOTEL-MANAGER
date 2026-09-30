@@ -13,6 +13,7 @@ use App\Http\Controllers\Finance\AccountsReceivableController;
 use App\Http\Controllers\Finance\CashDisbursementController;
 use App\Http\Controllers\Finance\ExpenseController;
 use App\Http\Controllers\Finance\FinancialAccountController;
+use App\Http\Controllers\Finance\IncomeSourceController;
 use App\Http\Controllers\Finance\RefundController;
 use App\Http\Controllers\Finance\ShiftController;
 use App\Http\Controllers\Finance\TransactionController;
@@ -651,6 +652,25 @@ Route::middleware('auth')->group(function () {
         Route::middleware('permission:manage-accounts-receivable')->prefix('accounts-receivable')->name('accounts-receivable.')->group(function () {
             Route::get('/', [AccountsReceivableController::class, 'index'])->name('index');
             Route::post('/{accountsReceivable}/settle', [AccountsReceivableController::class, 'settle'])->name('settle');
+        });
+
+        // Direct request, fast follow-up to the income-source dropdown
+        // ("the list should not be fixed... the accountant, or finance
+        // officer [create/update], and [the owner] should be able to
+        // update, create and delete it"): the managed list behind the
+        // "Income source" dropdown on the general "record a payment"
+        // screen. Create/update need only `manage-income-sources`
+        // (Owner/General Manager/Accountant); delete is the more
+        // destructive action and is Owner-only via
+        // `delete-income-sources` — the same split already used for
+        // `delete-users`/`void-transactions` (see RolesAndPermissionsSeeder).
+        Route::middleware('permission:manage-income-sources')->prefix('income-sources')->name('income-sources.')->group(function () {
+            Route::get('/', [IncomeSourceController::class, 'index'])->name('index');
+            Route::post('/', [IncomeSourceController::class, 'store'])->name('store');
+            Route::put('/{incomeSource}', [IncomeSourceController::class, 'update'])->name('update');
+        });
+        Route::middleware('permission:delete-income-sources')->prefix('income-sources')->name('income-sources.')->group(function () {
+            Route::delete('/{incomeSource}', [IncomeSourceController::class, 'destroy'])->name('destroy');
         });
     });
 

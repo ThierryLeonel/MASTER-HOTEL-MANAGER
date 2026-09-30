@@ -13,12 +13,14 @@
         <div class="text-2xl font-semibold">{{ $kpis['occupancy_rate'] }}%</div>
     </div>
     <div class="rounded-lg bg-white p-4 shadow-sm">
-        <div class="text-xs text-slate-500">ADR</div>
+        <div class="text-xs text-slate-500" title="Average Daily Rate — total room revenue divided by rooms actually sold">ADR</div>
         <div class="text-2xl font-semibold">{{ number_format($kpis['adr'], 0) }}</div>
+        <div class="text-xs text-slate-500">Average Daily Rate</div>
     </div>
     <div class="rounded-lg bg-white p-4 shadow-sm">
-        <div class="text-xs text-slate-500">RevPAR</div>
+        <div class="text-xs text-slate-500" title="Revenue Per Available Room — total room revenue divided by every room available, occupied or not">RevPAR</div>
         <div class="text-2xl font-semibold">{{ number_format($kpis['revpar'], 0) }}</div>
+        <div class="text-xs text-slate-500">Revenue Per Available Room</div>
     </div>
     <div class="rounded-lg bg-white p-4 shadow-sm">
         <div class="text-xs text-slate-500">Net cash flow</div>

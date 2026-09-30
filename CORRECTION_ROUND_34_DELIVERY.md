@@ -1600,3 +1600,369 @@ New tests in `tests/Feature/FrontOffice/PaymentModuleTest.php`: a discount recor
 recorded `amount` stays the real net cash received; a discount amount without a reason is rejected; a
 payment with no discount reports none. Same standing limitation as every round — not executed, `php -l`
 passes project-wide, the touched view's directive/tag balance checks pass.
+
+## 14. Income source on the general payment screen is now a dropdown
+
+Direct request: "let the income source be a dropdown of the income sources if other then state. you should
+identify all the income sources and do the dropdown" — the free-text "Income source" field on the
+general-purpose "record a payment" screen (`front-office/payments/index.blade.php`) invites spelling drift
+(e.g. "Rent" vs "rent" vs "Room rent") that fragments the Income Statement's other-income grouping. The
+user asked me to identify the list myself, so it's authored from hotel-accounting practice, deliberately
+scoped to genuinely ad-hoc income that has nowhere else to be recorded — it excludes anything with its own
+dedicated flow elsewhere in the system: room/folio charges, POS outlet sales, gym/pool facility access, and
+reservation deposits/forfeitures.
+
+- **`Payment::INCOME_SOURCES`** (new constant — **superseded by §15 below**, which moved this same starter
+  list into a managed database table the moment it needed to be editable without a code deployment):
+  `Rent`, `Event hall / conference hire`, `Guest advance payment`, `Commission received`, `Damage /
+  breakage charge`, `Lost and found (unclaimed item)`, `Sponsorship / advertising`, `Sale of scrap or used
+  equipment`, `Miscellaneous other income`.
+- **The form** now offers a `<select>` built from that list, plus an `Other (please state)` option. Choosing
+  "Other" reveals a text field (same show/hide pattern already used for the discount checkbox) where the
+  accountant types the actual source.
+- **No schema change.** `payments.income_source` stays the same free-text column it already was — this is a
+  data-entry aid on top of it, not a new enum to migrate to. Old free-text values already in the database
+  display exactly as before.
+- **`PaymentController::store()`**: validation is unchanged (`income_source` stays `required|string|max:120`,
+  so every value the dropdown can submit already satisfies it and no existing caller breaks); a new
+  `income_source_other` field is `required_if:income_source,__other__`. The controller resolves whichever
+  one the accountant actually meant — the sentinel `__other__` never reaches the database, only the stated
+  text does.
+- **`FinancialReportService::otherIncomeBySource()`** needed no change — it already just groups by whatever
+  string ends up in `income_source`, regardless of whether a dropdown or free text put it there.
+
+### 14.1 Testing disclosure
+
+New tests in `tests/Feature/FrontOffice/PaymentModuleTest.php`: choosing "Other" and stating a value records
+that stated text (not the sentinel) as the payment's `income_source`; choosing "Other" without stating a
+value is rejected. All pre-existing tests in that file (which post plain free-text `income_source` values
+such as `Rent`, `Event hall hire`, `Guest advance`) still pass unchanged, since server-side validation was
+deliberately left permissive. Same standing limitation as every round — not executed, `php -l` passes
+project-wide, the touched view's directive/tag balance checks pass.
+
+## 15. The income-source list is now managed, not fixed — accountant/GM can create/update, only Owner can delete
+
+Direct request, a fast follow-up to §14: **"the list should not be fixed the accountant, or finance officer
+(update, create) and the [owner] should be able to update, create and delete it."** §14's dropdown had only
+just shipped as a hardcoded `Payment::INCOME_SOURCES` PHP constant — fine for *choosing* a value, wrong for
+*managing* the list, which is exactly what this round adds. "Finance officer" in the request maps onto this
+system's existing `accountant` role; no separate role exists anywhere else in this system, and none was
+asked for.
+
+- **New `income_sources` table** (`IncomeSource` model) — id, `name` (unique), `created_by`/`updated_by`,
+  timestamps, plus the usual sync `ulid` every syncable model in this app carries. This is deliberately a
+  *separate* table from `payments`, not a foreign key on it: `payments.income_source` (§11) stays exactly
+  the free-text column it already was. Nothing here ever rewrites a historical payment — renaming or even
+  deleting an `IncomeSource` row only ever changes what the dropdown offers **going forward**; a payment
+  already recorded under a name keeps showing that exact text, untouched, because it was never linked by ID
+  in the first place. That is what makes a real, permanent delete safe here, unlike everywhere else in this
+  engagement "delete" has meant "deactivate/soft-delete" (Guest, User) — this table carries no financial
+  history of its own to protect.
+- **`IncomeSourceSeeder`** seeds the exact 9-item starter list from §14 on a fresh install (idempotent,
+  `firstOrCreate`) — but, per this request, it is no longer the only way that list can ever change.
+- **Two new permissions** (`RolesAndPermissionsSeeder`): `manage-income-sources` (create + update — held by
+  Owner and General Manager via `$all`, and granted explicitly to Accountant) and `delete-income-sources`
+  (Owner-only — excluded from General Manager's `$all` grant), the exact same "delete is more destructive,
+  so it's Owner-only" split already established for `delete-users` and `void-transactions` (§10/§12).
+- **New screen**: Finance → Income Sources (`finance.income-sources.*`) — a table with an inline
+  rename-and-save form per row (visible, editable only with `manage-income-sources`) and a "Delete" button
+  (visible only with `delete-income-sources`), plus an "Add an income source" panel. Linked directly from
+  the "Income source" field's label on the general "record a payment" screen for anyone who can manage the
+  list, so nobody has to already know the screen exists to find it.
+- **`PaymentController::index()`** now reads the dropdown's options from `IncomeSource::orderBy('name')`
+  instead of the retired PHP constant; the "Other (please state)" option and its resolution in
+  `PaymentController::store()` are unchanged from §14.
+
+### 15.1 Testing disclosure
+
+New `tests/Feature/Finance/IncomeSourceTest.php`: Accountant can create and rename an entry; Owner can
+create, update, *and* delete one; General Manager holds `manage-income-sources` but is correctly forbidden
+from deleting (mirrors the existing `delete-users`-vs-`manage-users` test pattern in
+`UserAdminTest`); Accountant is likewise forbidden from deleting; a role with neither permission
+(`front_desk`) is forbidden from creating or renaming; a duplicate name is rejected; and — the load-bearing
+test for this whole design — deleting an `IncomeSource` leaves a payment already recorded under that name
+completely untouched. Same standing limitation as every round — not executed, `php -l` passes project-wide,
+every touched/new view's directive/tag balance checks pass.
+
+## 16. Deploy fix: a fresh MySQL database failed on `financial_account_reconciliations`'s composite index
+
+Reported from a real Laravel Cloud deploy — the **first-ever deploy for a brand new hotel/site** (a
+genuinely empty MySQL database, not this engagement's own Jagemn Palace Hotel database) failed partway
+through `php artisan migrate --force` with:
+
+```
+SQLSTATE[42000]: Syntax error or access violation: 1059 Identifier name 'financial_account_reconciliations_
+financial_account_id_reconciled_at_index' is too long
+```
+
+**Root cause**: `2025_01_03_000200_create_financial_account_reconciliations_table.php` added a composite
+index with `$table->index(['financial_account_id', 'reconciled_at'])` and no explicit name. Laravel's
+auto-generated name for that — `financial_account_reconciliations_financial_account_id_reconciled_at_index`
+— is 76 characters, over MySQL's hard 64-character identifier limit (this is a real MySQL limit, not
+something either Laravel or this project's own code was working around badly; Postgres, notably, just
+silently truncates an over-long identifier instead of erroring, which is presumably why this project's own
+earlier Postgres-based verification never caught it). It never surfaced on any deploy before this one
+because every prior deploy either already had this table (this migration's own `Schema::hasTable()` guard,
+added for an earlier shared-hosting timeout issue, returned before ever reaching the index) or ran against
+Postgres. A first deploy against a brand-new, empty MySQL database is the one case that actually executes
+this `CREATE TABLE` for real.
+
+**The exact stuck state this leaves behind, and why the fix has to handle it directly**: MySQL auto-commits
+DDL — a `CREATE TABLE` and the `ALTER TABLE ... ADD INDEX` that follows it are two separate, independently
+committed statements, not one atomic unit. The `CREATE TABLE` above had already succeeded by the time the
+index statement failed, so the affected database is left with the `financial_account_reconciliations` table
+fully created (every column present) but missing this one index — and, because the migration's `up()`
+method threw, Laravel never recorded it as run. A plain retry of the same broken migration would hit
+`Schema::hasTable()` returning true, `return` immediately (the correct behavior in the ordinary case that
+guard was written for), and permanently leave that specific database missing the index with no further
+error or warning.
+
+**Fix**: the composite index now has an explicit, short name (`far_account_reconciled_at_idx`, 30
+characters). The migration's existing "table already exists" branch was also extended: instead of returning
+unconditionally, it now checks (via Laravel 12's native `Schema::getIndexes()` — no doctrine/dbal needed)
+whether that named index already exists, and adds it if not. This means anyone hitting this exact failure
+does **not** need to touch their database by hand — simply redeploying this corrected code lets
+`php artisan migrate --force` pick up exactly where it left off: it finds the table already there (from the
+failed attempt), adds the one missing index under its new short name, records the migration as done, and
+continues through every migration that comes after it, uninterrupted.
+
+This change has **zero effect on any database that already has this migration recorded as run** (Jagemn
+Palace Hotel's production database included) — Laravel tracks completed migrations by filename in its own
+`migrations` table, not by re-diffing a migration file's contents, so editing this file's code doesn't cause
+Laravel to reconsider a migration it already ran.
+
+I also wrote a small script to scan every migration in this codebase for any other composite
+index/unique/foreign-key name that might be at or over MySQL's 64-character limit — this was the only one
+over it (one foreign-key constraint name on this same table sits at 62 characters, under the limit, and
+needs no change).
+
+### 16.1 Testing disclosure
+
+No feature test covers a migration failure/retry path directly (this project has no automated way to spin
+up a real fresh MySQL database mid-test-suite the way Laravel Cloud's deploy does). Verified instead by: (1)
+manually computing the exact byte length of the old auto-generated index name against MySQL's documented
+64-character `NAMEDATALEN`-equivalent limit; (2) the migration-scanning script described above, run against
+every migration file in the project; (3) `php -l` on the corrected migration file. Same standing limitation
+as every round on top of that — no `vendor/`, so this migration was never actually executed against a real
+database as part of this delivery; the fix should be verified for real the moment it's redeployed.
+
+## 17. Deploy fix: a second, different deploy failed on a missing `bootstrap/cache` directory
+
+**Reported**: a second Laravel Cloud deployment (a different hotel/site, using this same corrected codebase)
+failed at a completely different step: `The /var/www/html/bootstrap/cache directory must be present and
+writable`.
+
+**This was not a code bug — it was a packaging mistake in the delivery zip itself.** Git (and, by extension,
+a zip built to mirror a git checkout) cannot track an empty directory at all; the standard Laravel skeleton
+works around this with a placeholder `.gitignore` file (containing `*` / `!.gitignore`) inside every
+directory that must exist but starts empty — `bootstrap/cache/`, `storage/framework/{cache,sessions,views,
+testing}/`, `storage/app/{public,private}/`, and `database/`. The zip-build command used for the previous
+delivery was:
+
+```
+zip -rq output.zip hms -x "*.git*"
+```
+
+The `-x "*.git*"` exclude pattern matches on substring/glob, not path segment — so it excluded every file
+whose path merely *contains* the four characters `.git`, which includes every one of those 12 `.gitignore`
+placeholder files project-wide, not just the real `.git/` version-control folder it was meant to exclude.
+The result: every one of those otherwise-empty directories, `bootstrap/cache` included, was silently missing
+from the zip entirely, and Laravel refuses to boot without it.
+
+**Fix**: the `.git` folder is already physically deleted from the staging directory before zipping (so the
+exclude flag was redundant even in its intended use), so the corrected command simply drops `-x` entirely:
+
+```
+rm -rf hms/vendor hms/node_modules hms/.git && zip -rq output.zip hms
+```
+
+Verified with `unzip -l` that all 12 `.gitignore` placeholders are present in the rebuilt zip.
+
+This has zero relationship to the MySQL index fix in §16 — it's a second, independent problem, entirely on
+this side (a packaging mistake), not a codebase defect. It also has zero effect on the first company's
+already-running deployment: nothing about a zip's packaging touches a database that has already been
+migrated, and each Laravel Cloud site has its own separate database and storage from the moment it's
+created.
+
+### 17.1 Testing disclosure
+
+Verified directly: `unzip -l` on the previous delivery zip confirmed the 12 `.gitignore` files were absent;
+`unzip -l` on the rebuilt zip (using the corrected command) confirmed all 12 are present. No code changed,
+so no `php -l`/test-suite check applies to this fix.
+
+## 18. All Transactions screen: fixed a 500 error on page load (Task #153)
+
+**Reported**: "when i click on all transaction it gives me error 500."
+
+**Root cause**: `resources/views/finance/transactions/index.blade.php` called
+`route('transactions.void', $payment)` inside its row loop, but that route is actually registered as
+`finance.transactions.void` — it's declared inside a nested `Route::prefix('finance')->name('finance.')
+->group(fn () => Route::prefix('transactions')->name('transactions.')->group(...))` block in
+`routes/web.php`, so its real, compound name is `finance.transactions.void`, not `transactions.void`. Calling
+`route()` with a name that doesn't exist throws `RouteNotFoundException` the instant Blade evaluates that
+`action="..."` attribute while rendering the row — which is why this happened immediately on opening the
+page (as soon as there was at least one real payment to loop over), not only when clicking "Void." With no
+payments yet, the `@forelse`'s `@empty` branch runs instead and the bug never surfaces — which is exactly why
+existing test coverage of the void feature itself (which posts straight to the void route from PHP, never
+rendering this view) never caught it.
+
+**Fix**: corrected the one line to `route('finance.transactions.void', $payment)`.
+
+### 18.1 Testing disclosure
+
+Added `test_the_all_transactions_list_renders_with_a_real_payment_in_it()` to
+`tests/Feature/Finance/TransactionVoidTest.php` — records a real payment via `PaymentLedgerService`, then
+asserts the All Transactions page actually renders (`assertOk()`) and shows that payment, which would have
+failed with the old route name. `php -l` clean; no `vendor/`, so this was not actually executed.
+
+## 19. ADR & RevPAR now show their full names wherever they appear (Task #154)
+
+**Reported**: "What is ADR & RevPAR: comment or full name."
+
+**Fix**: every screen showing these two KPI tiles (KPI Dashboard, Occupancy Report, Management Report, and
+their three printable variants, plus the Weekly Owner Summary's prose sentence) now shows the acronym
+alongside its full name — "ADR (Average Daily Rate)" / "RevPAR (Revenue Per Available Room)" — either as a
+visible subtitle under the tile (screen versions) or inline in the label/sentence (print versions and the
+Weekly Owner Summary). Nothing about how either figure is calculated changed — this is a labelling-only fix.
+
+Touched: `resources/views/reports/kpi-dashboard.blade.php`, `occupancy.blade.php`,
+`management-report.blade.php`, their `-print` variants, and `weekly-owner-summary.blade.php` /
+`weekly-owner-summary-print.blade.php`.
+
+### 19.1 Testing disclosure
+
+Blade `<div>` tag-balance verified on all three screen dashboards (28/28, 19/19, 23/23 — no mismatch).
+`php -l` clean on all 8 touched files. No behavior changed, so no new feature test was needed — existing
+tests asserting these pages render (`assertOk()`) already cover this.
+
+## 20. A shift can no longer close with an unexplained cash variance (Task #156)
+
+**Reported**: "before the closure any shift if there is any variance, the person in shift must explain with
+a note."
+
+**Fix**: `ShiftService::close()` now throws an `HmsException` — surfaced as a friendly flashed session error,
+the same pattern used throughout this app for a business-rule violation — the moment a shift's declared cash
+differs from its expected cash (`variance !== 0`) and no `notes` were given. A shift that balances exactly
+still needs no note; only an actual shortage or overage requires one. This is enforced in the service itself,
+not only the form, so it holds regardless of how `close()` is ever called.
+
+The Shifts screen's "Close & declare cash" flow was extended to match: after the declared-cash prompt, it now
+reads the expected-cash figure already shown live on that row (the existing 20-second poll) and, if the two
+differ, immediately prompts for an explanation before submitting — a smoother first attempt at the same rule
+the server enforces regardless, in case that figure hasn't loaded yet or still disagrees for some other
+reason.
+
+### 20.1 Testing disclosure
+
+Updated `test_a_shift_with_a_cash_shortage_records_a_negative_variance()` in `tests/Feature/Finance/
+ShiftTest.php` (previously closed a shift with a variance and no note, which is now correctly rejected — a
+`notes` field was added to that test's close() call, since the underlying requirement genuinely changed, not
+worked around). Added two new tests: closing a shift with a variance and no note is rejected (stays `open`,
+session has an `error`), and closing a shift with zero variance still needs no note. `php -l` clean; no
+`vendor/`, so none of this was actually executed against a real test run.
+
+## 21. Direct "Guest history" link from the Active Stays list (Task #157)
+
+**Reported**: "let there be a direct button to see specific guest history in the active stay."
+
+**Fix**: the existing consolidated Guest Transaction History screen (`GuestTransactionHistoryController::
+show()`, already gated by the `view-guest-history` permission — built in an earlier round of this
+engagement) previously had no entry point from the Active Stays list itself; staff had to know the guest's
+own profile page to find it. Added a "Guest history" link next to the existing "Open folio" link on every row
+of `front-office/stays/index.blade.php`, shown only to whoever already holds `view-guest-history`.
+
+### 21.1 Testing disclosure
+
+No new test added — this is a link to an existing, already-tested screen and permission, and adding a link
+doesn't change either's behavior. Verified with `php -l` and a Blade tag-balance check on the touched file.
+
+## 22. Manually-recorded Bar/Restaurant income is now recognised as real department revenue, not generic "other income" (Task #155)
+
+**Reported** (with 7 screenshots of the Payments, Income Statement, Financial Report, Weekly Owner Summary,
+Department Payment Reconciliation, Guest Stay History, and KPI Dashboard screens): "the income payment
+received that was recorded by the accountant is not completely recognised as income or revenue even though
+it states that income from bar and restau[rant]. please this income payment recording happened because the
+bar and the restaurant are not having their own device at the moment so they pay their total amount sold to
+the accountant and he reconciles them. and because of this the reports are not straight."
+
+**Root cause**: every payment recorded on the general "record a payment" screen (`PaymentController`,
+`front-office/payments/index.blade.php`) was always auto-attributed to Front Office
+(`PaymentLedgerService::SOURCE_MODULE_DEPARTMENT_CODES['general_payment'] = 'FO'`), with no way to say it was
+actually another department's own sales handed over in cash. Since Bar and Restaurant have no POS device at
+the moment, their entire day's takings get handed to the accountant and recorded on this general screen —
+which meant that money only ever showed up as a disconnected "other income" line (grouped by whatever text
+was typed into "Income source," e.g. "BAR AND RESTAURANT"), never as real Bar/Restaurant revenue anywhere
+revenue is broken down by type. Concretely, from the screenshots: the Financial Report and KPI Dashboard's
+"Revenue (accrual)" both showed only the 110,000 XAF actually posted to guest folios, completely missing the
+94,500 XAF recorded through the general payment screen; the Department Payment Reconciliation report showed
+Bar and Restaurant's own "Sales/income" as 0 despite real cash having been collected from them; and the
+Income Statement only showed this money as a separate "BAR AND RESTAURANT"/"Uncategorized" line rather than
+true Bar/Restaurant revenue.
+
+**Fix — three parts, all reusing existing, already-audited mechanisms rather than inventing new ones**:
+
+1. **The payment form can now explicitly say which department this handover belongs to.**
+   `front-office/payments/index.blade.php`'s "Record a payment" form gained an optional "This is sales
+   handed over by" dropdown, offering Bar, Restaurant, Bar Outside, and Bucareaux (Front Office is
+   deliberately excluded — it's already the automatic default, so there's nothing to choose; back-office
+   departments with no sales of their own — Finance, Management, Housekeeping, Maintenance — are never
+   offered). Leaving it on "None" keeps every existing payment's behavior completely unchanged.
+   `PaymentController::store()` validates the submitted id server-side against exactly that same
+   whitelist (never trusting an arbitrary department id from the request, the same defensive pattern
+   already used for `financial_account_id`), and passes it through as `PaymentLedgerService::record()`'s
+   existing `$departmentId` parameter — a parameter that already existed for Expense/CashDisbursement's own
+   cost-attribution use, and which conveniently already skips the shift-open gate when passed explicitly
+   (appropriate here too, since Bar/Restaurant have no shift workflow for this manual handover process).
+   The Payments list also now shows a "Department" column, so an attributed handover is visible at a
+   glance.
+
+2. **`FinancialReportService::revenueByChargeType()` folds a Bar/Restaurant-attributed payment straight
+   into the matching `bar_charge`/`restaurant_charge` bucket.** Since this one method already feeds the
+   Financial Report screen, the KPI Dashboard's "Revenue (accrual)" tile, the Management Report, and (via
+   `incomeStatement()`) the Income Statement and Weekly Owner Summary, this single change makes the money
+   show up correctly, consistently, everywhere revenue-by-type is shown — never a separately-labelled
+   catch-all. Scoped to Bar and Restaurant specifically — the two departments named in the request, and the
+   only two with a matching `FolioTransaction` charge type; Bar Outside and Bucareaux have no charge-type
+   bucket of their own in this codebase, so a handover attributed to either of those is still recognised as
+   that department's own cash and sales in the Department Payment Reconciliation report (point 3 below),
+   but keeps showing as generic "other income" on the Income Statement, exactly as before.
+
+3. **`otherIncomeBySource()` excludes exactly these same rows**, so this money is counted exactly once
+   across the whole reporting suite. Without this, `incomeStatement()` (which merges `revenueByChargeType()`
+   and `otherIncomeBySource()` into one blended figure) would have double-counted a Bar/Restaurant handover —
+   once as real charge-type revenue, a second time as "other income."
+
+4. **`DepartmentReconciliationReportService::salesFor()`** now adds a department's attributed general
+   payments on top of its real POS order totals, for all four outlet departments (Bar, Restaurant, Bar
+   Outside, Bucareaux) — fixing the 0 "Sales/income" the screenshot showed for Bar/Restaurant. This is a
+   separate, broader fix than point 2 above (which is Bar/Restaurant-only) because this report's cash-in/
+   cash-out figures already treated all four outlet departments symmetrically before this round; there is
+   no other reason a general payment would ever be attributed to an outlet department, so counting it as
+   that department's sales here is safe without a separate flag.
+
+**What this deliberately does NOT do** — consistent with this engagement's standing rule against rewriting
+historical financial records: it does not retroactively reclassify any payment already recorded before this
+fix shipped. The two blank-income-source "MTN MOMO" payments and the existing "BAR AND RESTAURANT" cash
+payment visible in the screenshots keep showing exactly as they always have, under "other income"/
+"Uncategorized" — only a payment where a department is explicitly chosen, from now on, is recognised as real
+department revenue. Nothing is fabricated either: this remains a manually-recorded `Payment`, visibly
+distinct from a real POS `Order`, never a fabricated order record standing in for one.
+
+### 22.1 Testing disclosure
+
+Added tests covering every part of this fix:
+- `tests/Feature/Reporting/FinancialReportTest.php`: a Bar-attributed payment is recognised as `bar_charge`
+  revenue; the same payment is excluded from `otherIncomeBySource()` (no double-counting on the Income
+  Statement, verified via `incomeStatement()`'s `total_revenue`); an unattributed payment still behaves
+  exactly as before this fix.
+- `tests/Feature/Reporting/DepartmentReconciliationReportTest.php`: a manually-recorded Bar handover counts
+  as Bar `sales`, on top of the `cash_in` figure that already counted it before this fix.
+- `tests/Feature/FrontOffice/PaymentModuleTest.php`: a payment can be explicitly attributed to Bar; a
+  crafted request naming a non-outlet department (e.g. Finance) is rejected server-side; leaving the
+  selector blank still defaults to Front Office, unchanged.
+
+`php -l` clean on every touched PHP file; Blade `@if`/`@foreach`/`@forelse`/`@can` directive balance and
+`<div>`/`<form>`/`<table>`/`<tr>`/`<td>`/`<th>`/`<select>`/`<option>`/`<label>`/`<thead>`/`<tbody>`/`<script>`
+tag balance verified on the touched view. Same standing limitation as every round in this engagement: no
+`vendor/` in this sandbox, so none of the above was actually executed — only syntax-checked and balance-
+checked. This should be run for real (`php artisan test`) before being treated as verified.

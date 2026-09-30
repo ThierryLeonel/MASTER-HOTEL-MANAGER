@@ -257,6 +257,104 @@ class FinancialReportTest extends TestCase
         $this->assertSame(8000.0, $statement['total_expenses']);
     }
 
+    /**
+     * Sept 2026 revenue-recognition fix ("the income payment recorded by
+     * the accountant is not completely recognised as income... because
+     * the bar and the restaurant are not having their own device at the
+     * moment so they pay their total amount sold to the accountant and
+     * he reconciles them"): a general payment explicitly attributed to
+     * the Bar department must count as real bar_charge revenue here, not
+     * a disconnected "other income" line.
+     */
+    public function test_a_general_payment_attributed_to_bar_is_recognised_as_bar_revenue(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $this->seed(\Database\Seeders\DepartmentSeeder::class);
+        $bar = \App\Models\Department::where('code', 'BAR')->first();
+
+        app(PaymentLedgerService::class)->record(
+            amount: 27500,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'BAR AND RESTAURANT',
+            departmentId: $bar->id,
+        );
+
+        $report = app(FinancialReportService::class)->revenueByChargeType(Carbon::today(), Carbon::today());
+
+        $this->assertSame(27500.0, $report['by_type']['bar_charge']);
+        $this->assertSame(27500.0, $report['total']);
+    }
+
+    /**
+     * The same handover must not also appear under "other income" — it
+     * would otherwise be counted twice on the Income Statement.
+     */
+    public function test_a_bar_attributed_general_payment_is_excluded_from_other_income_to_avoid_double_counting(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $this->seed(\Database\Seeders\DepartmentSeeder::class);
+        $restaurant = \App\Models\Department::where('code', 'REST')->first();
+
+        app(PaymentLedgerService::class)->record(
+            amount: 13000,
+            method: 'mobile_money',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('MTN')->id,
+            incomeSource: 'BAR AND RESTAURANT',
+            departmentId: $restaurant->id,
+        );
+        // An ordinary, unattributed general payment still behaves exactly
+        // as before.
+        app(PaymentLedgerService::class)->record(
+            amount: 5000,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'Rent',
+        );
+
+        $otherIncome = app(FinancialReportService::class)->otherIncomeBySource(Carbon::today(), Carbon::today());
+        $statement = app(FinancialReportService::class)->incomeStatement(Carbon::today(), Carbon::today());
+
+        $this->assertArrayNotHasKey('BAR AND RESTAURANT', $otherIncome['by_source']);
+        $this->assertSame(5000.0, $otherIncome['total']);
+        $this->assertSame(13000.0, $statement['revenue_by_type']['restaurant_charge']);
+        $this->assertSame(5000.0, $statement['revenue_by_type']['Rent']);
+        $this->assertSame(18000.0, $statement['total_revenue'], 'The 13,000 must be counted exactly once.');
+    }
+
+    /**
+     * Historical payments recorded before this fix shipped (no
+     * department_id at all, or Front Office's own automatic default)
+     * must keep behaving exactly as before — never rewritten or
+     * reclassified retroactively.
+     */
+    public function test_an_unattributed_general_payment_still_falls_under_other_income_as_before(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $this->openShiftFor('FO');
+
+        app(PaymentLedgerService::class)->record(
+            amount: 20000,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'Rent',
+        );
+
+        $report = app(FinancialReportService::class)->revenueByChargeType(Carbon::today(), Carbon::today());
+        $otherIncome = app(FinancialReportService::class)->otherIncomeBySource(Carbon::today(), Carbon::today());
+
+        $this->assertSame(0.0, $report['total']);
+        $this->assertSame(20000.0, $otherIncome['by_source']['Rent']);
+    }
+
     public function test_duty_manager_cannot_view_the_income_statement(): void
     {
         $dutyManager = $this->userWithRole('duty_manager');

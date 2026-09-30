@@ -177,6 +177,114 @@ class PaymentModuleTest extends TestCase
         $this->assertDatabaseMissing('payments', ['amount' => '18000.00']);
     }
 
+    /**
+     * Follow-up request ("let the income source be a dropdown of the
+     * income sources if other then state"): the form now submits the
+     * sentinel '__other__' plus a free-text `income_source_other` field
+     * when the accountant picks "Other" — the controller must resolve
+     * that into the actual stated text, not store the literal sentinel.
+     */
+    public function test_a_payment_can_record_an_other_income_source_with_a_stated_value(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 7500,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Vending machine collection',
+            'income_source' => '__other__',
+            'income_source_other' => 'Vending machine income',
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $this->assertNotNull($payment);
+        $this->assertSame('Vending machine income', $payment->income_source);
+    }
+
+    public function test_choosing_other_income_source_without_stating_it_is_rejected(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+
+        $response = $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 7500,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Vending machine collection',
+            'income_source' => '__other__',
+        ]);
+
+        $response->assertSessionHasErrors('income_source_other');
+        $this->assertDatabaseMissing('payments', ['amount' => '7500.00']);
+    }
+
+    /**
+     * Sept 2026 revenue-recognition fix ("the income payment recorded by
+     * the accountant is not completely recognised as income... because
+     * the bar and the restaurant are not having their own device at the
+     * moment so they pay their total amount sold to the accountant and
+     * he reconciles them"): the form can now explicitly attribute a
+     * general payment to Bar/Restaurant/Bar Outside/Bucareaux.
+     */
+    public function test_a_payment_can_be_explicitly_attributed_to_the_bar_department(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $bar = \App\Models\Department::where('code', 'BAR')->first();
+
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 27500,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Bar takings handed over — no device yet',
+            'income_source' => 'BAR AND RESTAURANT',
+            'department_id' => $bar->id,
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $this->assertSame($bar->id, $payment->department_id);
+    }
+
+    /**
+     * A crafted request naming a department this screen was never meant
+     * to attribute to (e.g. Finance or Management, which have no sales
+     * of their own) must be refused server-side, the same way an
+     * inactive financial account is.
+     */
+    public function test_a_payment_cannot_be_attributed_to_a_non_outlet_department(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $finance = \App\Models\Department::where('code', 'FIN')->first();
+
+        $response = $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 10000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Should not be allowed',
+            'income_source' => 'Rent',
+            'department_id' => $finance->id,
+        ]);
+
+        $response->assertSessionHasErrors('department_id');
+        $this->assertDatabaseMissing('payments', ['amount' => '10000.00']);
+    }
+
+    /**
+     * Leaving the new department selector blank must keep today's
+     * behaviour exactly — auto-attributed to Front Office, same as every
+     * general payment before this fix.
+     */
+    public function test_leaving_the_department_blank_still_defaults_to_front_office(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $fo = \App\Models\Department::where('code', 'FO')->first();
+
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 5000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Rent',
+            'income_source' => 'Rent',
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $this->assertSame($fo->id, $payment->department_id);
+    }
+
     public function test_a_payment_with_no_discount_reports_none(): void
     {
         $accountant = $this->userWithRole('accountant');

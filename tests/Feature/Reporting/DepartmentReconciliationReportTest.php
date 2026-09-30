@@ -58,6 +58,39 @@ class DepartmentReconciliationReportTest extends TestCase
         $this->assertSame(4000.0, $barRow['net_cash']);
     }
 
+    /**
+     * Sept 2026 revenue-recognition fix ("the bar and the restaurant are
+     * not having their own device at the moment so they pay their total
+     * amount sold to the accountant and he reconciles them"): a general
+     * payment explicitly attributed to Bar must count as that
+     * department's own sales here, on top of any real POS orders it
+     * also has — not show as 0 just because there was no POS device for
+     * this particular handover.
+     */
+    public function test_a_manually_recorded_bar_handover_counts_as_bar_sales(): void
+    {
+        $accountant = $this->userWithRole('accountant');
+        $bar = \App\Models\Department::where('code', 'BAR')->first();
+
+        app(\App\Services\PaymentLedgerService::class)->record(
+            amount: 27500,
+            method: 'cash',
+            sourceModule: 'general_payment',
+            recordedBy: $accountant,
+            financialAccountId: $this->financialAccount('CASH')->id,
+            incomeSource: 'BAR AND RESTAURANT',
+            departmentId: $bar->id,
+        );
+
+        $report = app(\App\Services\Reporting\DepartmentReconciliationReportService::class)
+            ->forRange(now()->startOfDay(), now()->endOfDay());
+
+        $barRow = $report['departments']->firstWhere(fn ($row) => $row['department']->code === 'BAR');
+
+        $this->assertSame(27500.0, $barRow['sales']);
+        $this->assertSame(27500.0, $barRow['cash_in'], 'The same payment already counted as Bar cash-in before this fix.');
+    }
+
     public function test_the_print_and_csv_variants_are_reachable(): void
     {
         $owner = $this->userWithRole('owner');

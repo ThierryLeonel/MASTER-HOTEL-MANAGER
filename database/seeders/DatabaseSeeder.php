@@ -25,6 +25,7 @@ class DatabaseSeeder extends Seeder
             PosSeeder::class,
             FacilitySeeder::class,
             FinancialAccountSeeder::class,
+            IncomeSourceSeeder::class,
             WebsiteBookingSeeder::class,
             InventorySeeder::class,
             HrSeeder::class,

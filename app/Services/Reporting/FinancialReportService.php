@@ -4,6 +4,7 @@ namespace App\Services\Reporting;
 
 use App\Models\AccountsReceivable;
 use App\Models\CashDisbursement;
+use App\Models\Department;
 use App\Models\Expense;
 use App\Models\FolioTransaction;
 use App\Models\Payment;
@@ -28,13 +29,78 @@ use Illuminate\Support\Collection;
 class FinancialReportService
 {
     /**
+     * Direct request (screenshots review, Sept 2026): "the income payment
+     * received that was recorded by the accountant is not completely
+     * recognised as income or revenue even though it states income from
+     * bar and restau[rant]... this income payment recording happened
+     * because the bar and the restaurant are not having their own device
+     * at the moment so they pay their total amount sold to the accountant
+     * and he reconciles them. and because of this the reports are not
+     * straight."
+     *
+     * Before this fix, EVERY payment recorded on the general "record a
+     * payment" screen (PaymentController) was always auto-attributed to
+     * Front Office (PaymentLedgerService::SOURCE_MODULE_DEPARTMENT_CODES
+     * ['general_payment'] = 'FO'), with no way to say it was actually a
+     * department's own sales handed over in cash — so a bar/restaurant
+     * takings handover only ever showed up as a generic, disconnected
+     * "other income" line (see otherIncomeBySource() below), never as
+     * real Bar/Restaurant revenue anywhere revenue is broken down by
+     * charge type (this method — and by extension the Financial report,
+     * the KPI dashboard's "Revenue (accrual)" tile, the Weekly Owner
+     * Summary, and the Management report, all of which read this method
+     * directly or via incomeStatement()).
+     *
+     * The fix: the payment form (front-office/payments/index.blade.php)
+     * now lets whoever records a bar/restaurant handover explicitly
+     * attribute it to that department (PaymentController::store() ->
+     * PaymentLedgerService::record()'s existing `$departmentId`
+     * parameter — see that service's docblock for why an explicit
+     * department also correctly skips the shift-open gate, since these
+     * outlets have no shift workflow of their own for this manual
+     * process). Once attributed, manuallyRecognizedOutletRevenue() below
+     * folds it straight into the matching FolioTransaction charge-type
+     * bucket, so it reads exactly like any other bar/restaurant sale
+     * everywhere revenue-by-type is shown, rather than a separately
+     * labelled catch-all.
+     *
+     * otherIncomeBySource() below deliberately EXCLUDES exactly these
+     * same rows (same department-id filter) so this money is recognised
+     * exactly once across the whole reporting suite, never twice.
+     *
+     * Scoped to Bar and Restaurant only — the two departments the user
+     * named, and the only two with a matching FolioTransaction charge
+     * type (bar_charge/restaurant_charge). Bar Outside and Bucareaux have
+     * no charge-type bucket of their own in FolioTransaction::CHARGE_TYPES,
+     * so a payment attributed to either of those still counts as that
+     * department's own cash and sales in the Department Payment
+     * Reconciliation report (see
+     * DepartmentReconciliationReportService::salesFor()) but keeps
+     * showing under "other income" here, same as before this fix.
+     *
+     * IMPORTANT — this does not retroactively reclassify anything already
+     * recorded: a payment with a blank/Front-Office department_id (every
+     * payment recorded before this fix shipped) keeps behaving exactly
+     * as it always has, under "other income"/Uncategorized. Only a
+     * payment where a department is explicitly chosen, from now on, is
+     * recognised this way — consistent with this engagement's rule of
+     * never rewriting historical financial records.
+     */
+    private const DEPARTMENT_CODE_TO_CHARGE_TYPE = [
+        'BAR' => 'bar_charge',
+        'REST' => 'restaurant_charge',
+    ];
+
+    /**
      * @return array{by_type: array<string, float>, total: float}
      */
     public function revenueByChargeType(Carbon $start, Carbon $end): array
     {
+        $range = [$start->copy()->startOfDay(), $end->copy()->endOfDay()];
+
         $rows = FolioTransaction::whereIn('type', FolioTransaction::CHARGE_TYPES)
             ->whereNull('voided_at')
-            ->whereBetween('transaction_date', [$start->copy()->startOfDay(), $end->copy()->endOfDay()])
+            ->whereBetween('transaction_date', $range)
             ->selectRaw('type, SUM(amount) as total')
             ->groupBy('type')
             ->pluck('total', 'type');
@@ -44,7 +110,59 @@ class FinancialReportService
             $byType[$type] = (float) ($rows[$type] ?? 0);
         }
 
+        foreach ($this->manuallyRecognizedOutletRevenue($range) as $type => $amount) {
+            $byType[$type] += $amount;
+        }
+
         return ['by_type' => $byType, 'total' => array_sum($byType)];
+    }
+
+    /**
+     * See revenueByChargeType()'s docblock for the full reasoning.
+     *
+     * @param array{0: Carbon, 1: Carbon} $range
+     * @return array<string, float> keyed by FolioTransaction charge type
+     */
+    private function manuallyRecognizedOutletRevenue(array $range): array
+    {
+        $departmentIdToType = Department::whereIn('code', array_keys(self::DEPARTMENT_CODE_TO_CHARGE_TYPE))
+            ->get()
+            ->mapWithKeys(fn (Department $d) => [$d->id => self::DEPARTMENT_CODE_TO_CHARGE_TYPE[$d->code]]);
+
+        if ($departmentIdToType->isEmpty()) {
+            return [];
+        }
+
+        $sums = Payment::where('source_module', 'general_payment')
+            ->where('direction', 'in')
+            ->whereNull('voided_at')
+            ->whereBetween('recorded_at', $range)
+            ->whereIn('department_id', $departmentIdToType->keys())
+            ->selectRaw('department_id, SUM(amount) as total')
+            ->groupBy('department_id')
+            ->pluck('total', 'department_id');
+
+        $byType = [];
+        foreach ($sums as $departmentId => $total) {
+            $type = $departmentIdToType[$departmentId];
+            $byType[$type] = ($byType[$type] ?? 0) + (float) $total;
+        }
+
+        return $byType;
+    }
+
+    /**
+     * The department ids folded into revenueByChargeType() above — see
+     * that method's docblock. Shared here so otherIncomeBySource() can
+     * exclude exactly the same rows and avoid double-counting them.
+     *
+     * @return array<int>
+     */
+    private function recognizedOutletDepartmentIds(): array
+    {
+        return Department::whereIn('code', array_keys(self::DEPARTMENT_CODE_TO_CHARGE_TYPE))
+            ->pluck('id')
+            ->all();
     }
 
     /**
@@ -132,14 +250,27 @@ class FinancialReportService
     {
         $range = [$start->copy()->startOfDay(), $end->copy()->endOfDay()];
 
-        $rows = Payment::where('direction', 'in')
+        $query = Payment::where('direction', 'in')
             ->where('source_module', 'general_payment')
             // Direct request ("the owner is suppose to be able to edit
             // all transaction[s]"): a voided payment must not count as
             // income either.
             ->whereNull('voided_at')
-            ->whereBetween('recorded_at', $range)
-            ->selectRaw("COALESCE(NULLIF(income_source, ''), 'Uncategorized') as source, SUM(amount) as total")
+            ->whereBetween('recorded_at', $range);
+
+        // Sept 2026 revenue-recognition fix — see revenueByChargeType()'s
+        // docblock: a payment explicitly attributed to Bar or Restaurant
+        // is recognised as that department's own charge-type revenue
+        // there instead, so it is excluded here to avoid counting the
+        // same handover twice on the Income Statement.
+        $recognizedDepartmentIds = $this->recognizedOutletDepartmentIds();
+        if ($recognizedDepartmentIds !== []) {
+            $query->where(function ($q) use ($recognizedDepartmentIds) {
+                $q->whereNull('department_id')->orWhereNotIn('department_id', $recognizedDepartmentIds);
+            });
+        }
+
+        $rows = $query->selectRaw("COALESCE(NULLIF(income_source, ''), 'Uncategorized') as source, SUM(amount) as total")
             ->groupBy('source')
             ->pluck('total', 'source')
             ->map(fn ($v) => (float) $v)

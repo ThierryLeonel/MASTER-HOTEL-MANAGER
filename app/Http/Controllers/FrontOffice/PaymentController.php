@@ -3,11 +3,14 @@
 namespace App\Http\Controllers\FrontOffice;
 
 use App\Http\Controllers\Controller;
+use App\Models\Department;
 use App\Models\FinancialAccount;
 use App\Models\Guest;
+use App\Models\IncomeSource;
 use App\Models\Payment;
 use App\Services\PaymentLedgerService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * Post-9.8 fix round ("there is supposed to be a payment module, where
@@ -28,13 +31,28 @@ use Illuminate\Http\Request;
  */
 class PaymentController extends Controller
 {
+    /**
+     * Sept 2026 revenue-recognition fix: the only departments a general
+     * payment can be explicitly attributed to from this screen — the
+     * outlets that hand over their takings here in lieu of their own POS
+     * device (see this class's store() docblock and
+     * FinancialReportService::revenueByChargeType() for the full
+     * reasoning). Front Office is deliberately excluded from this list —
+     * it's already the automatic default for every payment recorded
+     * here (PaymentLedgerService::SOURCE_MODULE_DEPARTMENT_CODES), so
+     * there's nothing for staff to choose. Back-office departments
+     * (Finance, Management, Housekeeping, Maintenance) have no sales of
+     * their own and are deliberately never offered here either.
+     */
+    private const ATTRIBUTABLE_DEPARTMENT_CODES = ['BAR', 'REST', 'BAROUT', 'BUCA'];
+
     public function __construct(private readonly PaymentLedgerService $ledger)
     {
     }
 
     public function index(Request $request)
     {
-        $payments = Payment::with(['guest', 'recordedBy', 'financialAccount'])
+        $payments = Payment::with(['guest', 'recordedBy', 'financialAccount', 'department'])
             ->where('source_module', 'general_payment')
             ->orderByDesc('id')
             ->paginate(25);
@@ -42,8 +60,18 @@ class PaymentController extends Controller
         // payment" form now picks a real financial account instead of a
         // bare method — see this controller's store() docblock.
         $financialAccounts = FinancialAccount::where('is_active', true)->orderBy('name')->get();
+        // Follow-up request ("the list should not be fixed... [staff]
+        // should be able to update, create and delete it"): the dropdown
+        // now reads the managed IncomeSource list instead of a hardcoded
+        // PHP constant — see that model's own docblock.
+        $incomeSources = IncomeSource::orderBy('name')->get();
+        // Sept 2026 revenue-recognition fix — see ATTRIBUTABLE_DEPARTMENT_CODES above.
+        $attributableDepartments = Department::whereIn('code', self::ATTRIBUTABLE_DEPARTMENT_CODES)
+            ->get()
+            ->sortBy(fn ($d) => array_search($d->code, self::ATTRIBUTABLE_DEPARTMENT_CODES))
+            ->values();
 
-        return view('front-office.payments.index', compact('payments', 'financialAccounts'));
+        return view('front-office.payments.index', compact('payments', 'financialAccounts', 'incomeSources', 'attributableDepartments'));
     }
 
     /**
@@ -70,10 +98,18 @@ class PaymentController extends Controller
             // statement"): every payment recorded here is money coming
             // in (PaymentLedgerService::record() defaults `direction` to
             // 'in', and this screen never overrides it), so every one of
-            // them must say what kind of income it is — free text, same
-            // convention as Expense::category, so no fixed list to
-            // maintain. Feeds FinancialReportService::otherIncomeBySource().
+            // them must say what kind of income it is. Stays free text
+            // here so the column and this validation are backward
+            // compatible with values already in the database and with
+            // existing tests — the managed list (see the IncomeSource
+            // model) is offered by the form's <select>, not enforced
+            // here. Follow-up request ("let the income source be a
+            // dropdown... if other then state"): the form submits the
+            // sentinel '__other__' plus `income_source_other` when the
+            // accountant picks "Other" — resolved below into the same
+            // free-text value. Feeds FinancialReportService::otherIncomeBySource().
             'income_source' => 'required|string|max:120',
+            'income_source_other' => 'required_if:income_source,__other__|nullable|string|max:120',
             // Direct request ("payments can involve discount if
             // granted"): `amount` above is always what was actually
             // received; a discount, if one was granted, is recorded
@@ -83,6 +119,21 @@ class PaymentController extends Controller
             // was granted" is never recorded without saying why.
             'discount_amount' => 'nullable|numeric|min:0.01',
             'discount_reason' => 'required_with:discount_amount|nullable|string|max:255',
+            // Sept 2026 revenue-recognition fix ("the income payment
+            // recorded by the accountant is not completely recognised as
+            // income... because the bar and the restaurant are not
+            // having their own device at the moment so they pay their
+            // total amount sold to the accountant and he reconciles
+            // them"): optional — leaving this blank keeps today's
+            // behaviour exactly (auto-attributed to Front Office).
+            // Restricted server-side to the real outlet department ids,
+            // never trusting an arbitrary id from the request, the same
+            // way `financial_account_id` above is re-verified against
+            // active accounts rather than trusted at face value.
+            'department_id' => [
+                'nullable',
+                Rule::in(Department::whereIn('code', self::ATTRIBUTABLE_DEPARTMENT_CODES)->pluck('id')->all()),
+            ],
         ]);
 
         $guest = ! empty($data['guest_id']) ? Guest::find($data['guest_id']) : null;
@@ -99,6 +150,14 @@ class PaymentController extends Controller
             $description = "{$data['payer_name']} — {$description}";
         }
 
+        // Follow-up request ("let the income source be a dropdown... if
+        // other then state"): "Other" is a UI sentinel only — the actual
+        // value stored is always the stated text, exactly as it was
+        // before this dropdown existed for every other choice.
+        $incomeSource = $data['income_source'] === '__other__'
+            ? $data['income_source_other']
+            : $data['income_source'];
+
         $this->ledger->record(
             amount: (float) $data['amount'],
             method: $account->paymentMethod(),
@@ -108,9 +167,10 @@ class PaymentController extends Controller
             guestId: $guest?->id,
             notes: $description,
             financialAccountId: $account->id,
-            incomeSource: $data['income_source'],
+            incomeSource: $incomeSource,
             discountAmount: isset($data['discount_amount']) ? (float) $data['discount_amount'] : null,
             discountReason: $data['discount_reason'] ?? null,
+            departmentId: ! empty($data['department_id']) ? (int) $data['department_id'] : null,
         );
 
         return back()->with('status', 'Payment recorded.');

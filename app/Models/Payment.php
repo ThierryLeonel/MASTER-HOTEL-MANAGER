@@ -8,6 +8,25 @@ use App\Services\Sync\Concerns\HasSyncUlid;
 class Payment extends Model
 {
     use HasSyncUlid;
+
+    // Direct request ("let the income source be a dropdown of the income
+    // sources... you should identify all the income sources"), then a
+    // fast follow-up ("the list should not be fixed... the accountant, or
+    // finance officer [create/update], and [the owner should be able to]
+    // update, create and delete it"): the dropdown on the general "record
+    // a payment" screen (front-office/payments/index.blade.php) first
+    // shipped as a hardcoded PHP constant here, then — per the follow-up
+    // — was moved into a proper managed table the moment ago that list
+    // needed to be editable without a code deployment. See the
+    // IncomeSource model, its migration, and IncomeSourceService for
+    // where that list now lives and who can change it.
+    //
+    // This column itself always stayed, and stays, free text (see its own
+    // migration and PaymentController::store()) — the dropdown (backed by
+    // IncomeSource) or its "Other" option just decide what string ends up
+    // here, so this table can be edited freely later without a migration
+    // and old values already in the database still display fine.
+
     protected $fillable = [
         'payment_number', 'direction', 'amount', 'method', 'financial_account_id', 'source_module',
         'department_id', 'source_reference', 'reference_type', 'reference_id',

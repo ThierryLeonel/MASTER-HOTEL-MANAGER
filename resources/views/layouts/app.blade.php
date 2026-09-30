@@ -236,7 +236,7 @@
                      this @canany would never render for anyone anyway; the
                      link itself is removed too so no dead markup remains. --}}
 
-                @canany(['manage-expenses', 'approve-expense', 'approve-large-expense', 'pay-expense', 'request-refund', 'approve-refund', 'record-cash-reconciliation', 'lock-accounting-day', 'authorize-cash-disbursement', 'record-cash-disbursement', 'manage-own-shift', 'view-shift-reports', 'manage-financial-accounts', 'manage-accounts-receivable'])
+                @canany(['manage-expenses', 'approve-expense', 'approve-large-expense', 'pay-expense', 'request-refund', 'approve-refund', 'record-cash-reconciliation', 'lock-accounting-day', 'authorize-cash-disbursement', 'record-cash-disbursement', 'manage-own-shift', 'view-shift-reports', 'manage-financial-accounts', 'manage-accounts-receivable', 'manage-income-sources'])
                     <div class="mt-3 border-t border-slate-700 pt-3 text-xs uppercase tracking-wide text-slate-500">Finance</div>
                 @endcanany
                 @canany(['manage-expenses', 'approve-expense', 'approve-large-expense', 'pay-expense'])
@@ -256,6 +256,9 @@
                 @endcanany
                 @can('manage-financial-accounts')
                     <a href="{{ route('finance.financial-accounts.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.financial-accounts.*') ? 'is-selected' : '' }}">Financial Accounts</a>
+                @endcan
+                @can('manage-income-sources')
+                    <a href="{{ route('finance.income-sources.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.income-sources.*') ? 'is-selected' : '' }}">Income Sources</a>
                 @endcan
                 @can('void-transactions')
                     <a href="{{ route('finance.transactions.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('finance.transactions.*') ? 'is-selected' : '' }}">All Transactions</a>

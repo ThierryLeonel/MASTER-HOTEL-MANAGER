@@ -178,9 +178,33 @@ class DepartmentReconciliationReportService
             return 0.0;
         }
 
-        return (float) Order::where('outlet', $outlet)
+        $posSales = (float) Order::where('outlet', $outlet)
             ->where('status', 'closed')
             ->whereBetween('closed_at', $range)
             ->sum('total_amount');
+
+        // Direct request (Sept 2026 revenue-recognition fix): "the bar
+        // and the restaurant are not having their own device at the
+        // moment so they pay their total amount sold to the accountant
+        // and he reconciles them." A payment explicitly attributed to
+        // this department via the general "record a payment" screen
+        // (see PaymentLedgerService::record()'s $departmentId parameter,
+        // wired through PaymentController::store()) IS that outlet's
+        // sales money handed over in lieu of a POS device — there is no
+        // other reason a general payment would be attributed to an
+        // outlet department — so it counts here exactly like a closed
+        // Order does. Applied to every outlet department (not just
+        // Bar/Restaurant) since this cash-reconciliation figure already
+        // treats all four symmetrically above; see
+        // FinancialReportService::revenueByChargeType() for the
+        // narrower, Bar/Restaurant-only fold into charge-type revenue.
+        $manualSales = (float) Payment::where('department_id', $department->id)
+            ->where('source_module', 'general_payment')
+            ->where('direction', 'in')
+            ->whereNull('voided_at')
+            ->whereBetween('recorded_at', $range)
+            ->sum('amount');
+
+        return $posSales + $manualSales;
     }
 }
