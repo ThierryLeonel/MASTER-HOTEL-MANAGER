@@ -2297,3 +2297,159 @@ executed against a real database or clicked through in a browser. Given this rou
 financially load-bearing flow), a real click-through of both the single and multi-room Walk-in Check-in
 forms, and a real run of `php artisan migrate` plus the new test suite, matters more than usual before
 treating this as verified.
+
+## 28. Shift cross-department leak fix, a single/multi-room reservation toggle, and a new Event Reservations feature
+
+**Reported** (verbatim, three separate items in one message): "THE ACCOUNTANT RECORDED A PAYMENT WHICH WAS
+AN INCOME UNDER THE BAR AND RESTAURANT AND IT AFFECTED THE EXPECTED AMMOUNT OF THE ACTIVE FRONT DESK SHIFT
+WHICH IS NOT SUPPOSE TO BE SO EVERY SHIFT IS INDPENDENT TO USER AND THE ACCOUNTANT HAS NO SHIFT ONLY THE BAR,
+RESTAURANT, FRONT DESK. IN THE RESERVATION WE ARE STILL NOT ABLE TO CHOSE IF IT IS A MULTIPLE ROOM
+RESERVATION OR SINGLE ROOM. IF IT IS MULTIPLE ONE SHOULD BE ABLE TO SELECT THE ROOMS. WE ALSO NEED
+RESERVATION FOR EVENT: WHAT KIND OF EVENT, WHICH SPACES DO THEY WANT TO RESERVE, ROOM, WHICH ROOMS
+(SELECT), MAIN HALL, MINI HALL FOR EXAMPLE, POOL OR THE WHOLE OUTER ENVIROMENT (SPACE) ETC. ALSO" (cut off).
+The reservation-UI and event-reservation items were large and ambiguous enough to scope with the client
+first via clarifying questions rather than guess — the client's answers, which govern everything built
+below, are recorded in each subsection.
+
+### 28.1 Shift cross-department leak (`PaymentLedgerService`)
+
+Root cause: `PaymentLedgerService::resolveDepartmentId()`'s `SOURCE_MODULE_DEPARTMENT_CODES` map had
+`'general_payment' => 'FO'` — every payment recorded through the general-purpose "record a payment" screen
+with no department chosen (the accountant's own workflow: label it with an "Income source" like "Bar
+Income", leave the separate "sales handed over by" department dropdown on "None") silently defaulted to
+Front Office, regardless of who actually recorded it. An accountant has no department/shift of their own at
+all, so this inflated whichever Front Desk shift happened to be open at the time — exactly the bug reported.
+
+Fixed by making the `general_payment` sourceModule's unattributed-default depend on the RECORDING user's own
+department, and only when that department is one of the five that actually carry a shift
+(`ShiftGateService::GATED_DEPARTMENT_CODES` — Front Office, Bar, Restaurant, Bar Outside, Bucareaux):
+
+- A front-desk staff member recording an unattributed payment still correctly lands on Front Office's own
+  shift (unchanged behavior).
+- An accountant (or anyone in Management/HR/Finance with no shift-carrying department) recording an
+  unattributed payment now correctly gets `department_id = null` and `shift_id = null` — the payment is
+  still recorded in full, with its income source and optional "handed over by" note intact for
+  traceability, but it never again inflates any outlet's cash reconciliation unless a department is
+  explicitly chosen from the dropdown.
+
+A plain-language amber warning was also added directly under the "sales handed over by" dropdown on the
+Payments screen, explaining that the Income Source label alone does not attribute money to a department or
+shift — aimed at reducing the chance of this exact confusion recurring from the input side, not just the
+backend.
+
+Tests: `tests/Feature/FrontOffice/PaymentModuleTest.php` — the two tests that previously asserted the old,
+now-incorrect "blank department defaults to Front Office" behavior for an accountant were rewritten to
+assert `null` instead, and a new companion test was added confirming a front-desk user's own blank-department
+payment still defaults to Front Office exactly as before. `tests/Feature/Finance/ShiftTest.php` — two new
+tests: one is the literal regression test (an accountant's unattributed payment never affects the open Front
+Desk shift's expected cash), the other confirms a genuine front-desk payment still does. Every other test
+anywhere in the suite that posts a `general_payment` with no department was checked by hand against this
+change (`SystemDataTest.php`, `TransactionVoidTest.php`, `FinancialReportTest.php`,
+`DepartmentReconciliationReportTest.php`) — none of their assertions depend on this payment's `department_id`
+being Front Office's id specifically, and `FinancialReportService::otherIncomeBySource()` already treats
+`department_id IS NULL` and `department_id = Front Office's id` identically for revenue-recognition purposes,
+so no income-statement total anywhere changes because of this fix.
+
+### 28.2 Reservation form: a single/multi-room toggle on one page
+
+Clarified via a clarifying question — **"One page with a toggle"** was the client's explicit choice, over
+keeping the two separate pages the system already had (a plain link between them) or any other layout.
+A second clarifying question asked whether a reservation should also let staff pick the actual room NUMBER
+at booking time (since "WHICH ROOMS (SELECT)" was in the same sentence) — the client's answer was
+**"No, keep category-based booking"**: a reservation still only books a room CATEGORY, with the real room
+assigned later at approval or check-in, exactly as before. Actual room selection at booking time is answered
+instead by the new Event Reservations feature below, which is a deliberately different kind of booking.
+
+`resources/views/front-office/reservations/create.blade.php` and `create-multi.blade.php` (two separate
+pages) are now ONE merged page with a "Single room / Multiple rooms" toggle at the top. Both
+`ReservationController::create()` and `createMulti()` render this same merged view now (so existing
+links/bookmarks to either route keep working); `createMulti()` defaults the toggle to the multi-room panel,
+and `create()` defaults to multi only when `old('rooms')` is present (i.e. a multi-room submission just
+failed validation and bounced back here). Each panel is its own independent `<form>` posting to the
+existing, completely unchanged `reservations.store` / `reservations.store-multi` routes — this was a
+front-end reorganization only; nothing in `ReservationController::store()`/`storeMulti()` or
+`ReservationService::create()`/`createGroup()` changed. The now-unreferenced
+`create-multi.blade.php` file was removed since both routes render the merged view.
+
+### 28.3 Event Reservations (new feature)
+
+Clarified via two clarifying questions. Which spaces should be reservable — the client multi-selected Main
+Hall, Mini Hall, Pool / outdoor area, and Specific guest rooms, and also typed a custom answer: **"Main Hall,
+Mini HALL, Conference halls, etc you know better"** — read as: the space list must be an ADMIN-EDITABLE,
+ever-growing list, not a fixed one, with the exact mechanism and any extra starter spaces left to this
+engagement's judgment. What an event reservation should capture: **"Full package"** — event type, expected
+guest count, a date/time range, and a deposit, explicitly "mirroring how room reservations already handle
+deposits and approval."
+
+**New tables** (`2025_02_02_001500_create_event_spaces_and_event_reservations_tables.php`):
+- `event_spaces` — the admin-editable venue list (name, description, max capacity, active flag). Deliberately
+  its own table rather than reusing `facilities`/`charge_types`: an event space has no per-use sale price at
+  all, it's a venue held for a block of time, which is a different thing to model than a chargeable item.
+  Seeded starter rows (`EventSpaceSeeder`, idempotent): Main Hall, Mini Hall, Pool / Outdoor Area, Conference
+  Hall — an admin can rename, add to, or deactivate any of these at any time from the new Event Spaces
+  screen.
+- `event_reservations` — event name/type (free text — too variable for a managed list, and carries no
+  availability rule of its own), an optional existing guest OR an inline contact name/phone/email (an event
+  organizer is very often not a lodging guest at all), expected guest count, a start/end date-time range,
+  status (`pending`/`confirmed`/`completed`/`cancelled`/`rejected`), an optional agreed total amount, and
+  `deposit_required`/`deposit_paid` mirroring `Reservation`'s own columns.
+- `event_reservation_spaces` / `event_reservation_rooms` — two separate pivots, since a booking can reserve
+  any combination of managed event spaces AND/OR specific lodging rooms ("WHICH ROOMS (SELECT)") in one
+  single event reservation (e.g. the Main Hall for a wedding reception plus three specific rooms for the
+  wedding party).
+
+**`EventReservationService`** mirrors `ReservationService` closely, on direct request ("mirroring how room
+reservations already handle deposits and approval"): `create()`/`approve()`/`reject()`/`cancel()` all use the
+same `DB::transaction` + `lockForUpdate()` + status re-check + `AuditLogger::log()` pattern; `recordDeposit()`
+posts through the same central `PaymentLedgerService` as every other payment in the system, with a new
+`sourceModule: 'event_deposit'` entry in `PaymentLedgerService::SOURCE_MODULE_DEPARTMENT_CODES` that always
+attributes to Front Office and requires an open Front Office shift — exactly like a room-reservation
+deposit already does (deliberately a plain map entry, not routed through the accountant-aware branch fixed
+in §28.1 above, since this sourceModule is only ever posted by this one service, with no accountant-vs-
+front-desk ambiguity to resolve). No double-booking: every selected event space is checked against every
+other still-live (pending/confirmed) event reservation for an overlapping time range, and every selected
+room is checked BOTH the same way AND by reusing the existing `Room::isAvailableFor()` directly, so a room
+already committed to a real guest Stay or Reservation can't also be booked for an event over the same dates
+— both checks run again, inside the lock, at `approve()` time too, closing the same race
+`ReservationService::approve()` already guards against.
+
+**Explicitly out of scope this round, disclosed rather than silently omitted** (kept deliberately tight for
+a first, reviewable version): no deposit disposition (refund/forfeit/transfer) workflow on cancellation — an
+event's deposit simply stays recorded as-is; a manager handles any actual refund manually via the existing
+Finance > Refunds screen. No automatic tie-in to the Room status state machine — booking a room for an event
+does not flip the room's status or create a Stay; it's purely a scheduling/availability reference, and front
+desk still runs an ordinary check-in separately for whoever actually occupies the room.
+
+**New permissions** (`RolesAndPermissionsSeeder`): `manage-event-spaces` (admin-tier — configuring which
+venues exist; Owner/GM via `$all`, plus Duty Manager), `manage-event-reservations` and
+`approve-event-reservation` (front-line — booking/approving events; Owner/GM/Duty Manager, plus Front Desk
+and Marketing Manager, mirroring exactly which roles already hold `manage-reservations`/`approve-reservation`
+today). **New routes**: `event-spaces.*` and `event-reservations.*` in `routes/web.php`, mirroring the
+`reservations.*`/`charge-types.*` route-group shape. **New screens**: `front-office/event-spaces/index`
+(admin CRUD, mirroring the Charge Types screen's edit-in-place/delete-only-if-unused pattern),
+`front-office/event-reservations/index|create|show` (mirroring the Reservations screens), plus new sidebar
+links gated on the same two permissions. **New Deploy Helper button**: `seedEventSpaces()` (always-safe,
+individually re-runnable, same pattern as `seedDepartments()`) for a no-SSH host whose Event Spaces list
+comes up empty.
+
+Tests: `tests/Feature/FrontOffice/EventSpaceTest.php` (admin create/update/deactivate, delete-refused-once-
+booked, permission denial) and `tests/Feature/FrontOffice/EventReservationTest.php` (create with a space and
+a room, requires-at-least-one-space-or-room, requires-a-guest-or-contact-name, approve/reject/cancel,
+permission denial for both `manage-event-reservations` and `approve-event-reservation`, an event space
+double-booking refusal, a room already booked by a guest Reservation refusing an overlapping event booking
+too, and the deposit-requires-an-open-FO-shift / deposit-attributes-to-FO-and-its-shift pair mirroring
+`ReservationDepositTest`).
+
+**Verification**: `php -l` clean on every touched/new PHP file this round, run both individually and as a
+full project-wide sweep (`app/`, `database/`, `routes/`, `tests/` — zero output). Blade directive/tag balance
+verified on every touched/new view plus a full sweep of every `.blade.php` file in the project — the only
+mismatches reported anywhere are the same two pre-existing false positives already disclosed in every
+earlier round (the single-argument `@section('title', ...)` form, and the one `@canany` inside a Blade
+comment in `layouts/app.blade.php`), confirmed unchanged in count from before this round. Same standing
+limitation as every round: no `vendor/` and no Packagist access in this sandbox, so nothing here — the new
+migration, the new admin screens, the merged reservation toggle, the new Event Reservations flows, or the new
+test files — was actually executed against a real database or clicked through in a browser. Given this round
+touches live cash attribution (§28.1) and introduces an entirely new booking type with its own double-booking
+logic (§28.3), a real `php artisan migrate` + `php artisan test` run, plus a manual click-through of the
+reservation toggle and a full event-reservation create → approve → deposit cycle, matters more than usual
+before treating this as verified.

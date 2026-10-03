@@ -282,6 +282,38 @@ class DeployHelperController extends Controller
         ]);
     }
 
+    /**
+     * Same reasoning as seedDepartments()/seedRolesAndPermissions()/
+     * seedFinancialAccounts() above, for the Event Reservations feature:
+     * `EventSpaceSeeder` only ever calls `firstOrCreate()` keyed on `name`
+     * (see that seeder's own docblock), so it is always safe to re-run on
+     * a database with any amount of real data — it only ever fills in
+     * whichever starter venue (Main Hall, Mini Hall, Pool / Outdoor Area,
+     * Conference Hall) is still missing, and never touches a space an
+     * admin has already renamed, edited, or deactivated. This is the
+     * direct fix for "the event space list is empty" on a host where this
+     * seeder never ran against the live database — the same class of gap
+     * seedDepartments() closed for the department dropdown.
+     */
+    public function seedEventSpaces(Request $request)
+    {
+        $this->authorizeRequest($request);
+
+        Artisan::call('db:seed', ['--class' => \Database\Seeders\EventSpaceSeeder::class, '--force' => true]);
+        $output = Artisan::output();
+
+        $this->logAction('deploy.event_spaces_seed_ran', $request);
+
+        $disabled = $request->boolean('disable_after') ? $this->disableHelper() : null;
+
+        return view('deploy-helper.result', [
+            'token' => $request->input('token'),
+            'heading' => 'Event spaces updated',
+            'output' => $output,
+            'disabled' => $disabled,
+        ]);
+    }
+
     public function clearCaches(Request $request)
     {
         $this->authorizeRequest($request);

@@ -265,16 +265,45 @@ class PaymentModuleTest extends TestCase
     }
 
     /**
-     * Leaving the new department selector blank must keep today's
-     * behaviour exactly — auto-attributed to Front Office, same as every
-     * general payment before this fix.
+     * Direct request ("the accountant recorded a payment which was an
+     * income under the bar and restaurant and it affected the expected
+     * amount of the active front desk shift which is not suppose to be
+     * so... the accountant has no shift"): this used to default to Front
+     * Office unconditionally regardless of who recorded it — the exact
+     * bug reported. An accountant (no department of their own that
+     * carries a shift) leaving the department selector blank must now
+     * get NO department attribution at all, not a silent Front Office
+     * default. See tests/Feature/Finance/ShiftTest.php for the full
+     * end-to-end regression proving this against a real open shift.
      */
-    public function test_leaving_the_department_blank_still_defaults_to_front_office(): void
+    public function test_leaving_the_department_blank_as_the_accountant_attributes_to_no_department(): void
     {
         $accountant = $this->userWithRole('accountant');
-        $fo = \App\Models\Department::where('code', 'FO')->first();
 
         $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 5000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Rent',
+            'income_source' => 'Rent',
+        ])->assertRedirect();
+
+        $payment = Payment::first();
+        $this->assertNull($payment->department_id);
+        $this->assertNull($payment->shift_id);
+    }
+
+    /**
+     * The flip side: a front-desk staff member (whose own
+     * `users.department_id` is Front Office) leaving the same selector
+     * blank keeps today's behaviour exactly — auto-attributed to Front
+     * Office, since it genuinely is their own department's cash.
+     */
+    public function test_leaving_the_department_blank_as_front_desk_still_defaults_to_front_office(): void
+    {
+        $fo = \App\Models\Department::where('code', 'FO')->first();
+        $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id, 'auth_type' => 'password_only']);
+
+        $this->actingAs($frontDesk)->post(route('payments.store'), [
             'amount' => 5000,
             'financial_account_id' => $this->financialAccount('CASH')->id,
             'notes' => 'Rent',
@@ -315,7 +344,9 @@ class PaymentModuleTest extends TestCase
      * A payment can name who handed it in WITHOUT attributing it to any
      * department — the two fields are independent, since sometimes
      * there's a name to record but no department the money should be
-     * formally recognised under.
+     * formally recognised under. Recorded by the accountant here, so (per
+     * the shift-attribution fix above) no department is auto-derived
+     * either.
      */
     public function test_a_payment_can_note_who_handed_it_in_without_a_department(): void
     {
@@ -330,8 +361,7 @@ class PaymentModuleTest extends TestCase
         ])->assertRedirect();
 
         $payment = Payment::first();
-        $fo = \App\Models\Department::where('code', 'FO')->first();
-        $this->assertSame($fo->id, $payment->department_id, 'No department was chosen, so this still defaults to Front Office as always.');
+        $this->assertNull($payment->department_id, 'No department was chosen and the accountant has no department of their own that carries a shift.');
         $this->assertSame('Mr. Tanga (tenant)', $payment->handed_over_by);
     }
 

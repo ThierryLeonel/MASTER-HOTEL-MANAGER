@@ -43,6 +43,11 @@ Route::middleware('throttle:10,1')->prefix('deploy-helper')->name('deploy-helper
     // Outside, Bucareaux, ...) and each system charge type's department
     // on an already-live hotel with no SSH access.
     Route::post('/seed-departments', [DeployHelperController::class, 'seedDepartments'])->name('seed-departments');
+    // Event Reservations feature: see DeployHelperController::
+    // seedEventSpaces()'s docblock — backfills the starter event-space list
+    // (Main Hall, Mini Hall, Pool / Outdoor Area, Conference Hall) on an
+    // already-live hotel with no SSH access.
+    Route::post('/seed-event-spaces', [DeployHelperController::class, 'seedEventSpaces'])->name('seed-event-spaces');
     Route::post('/clear-caches', [DeployHelperController::class, 'clearCaches'])->name('clear-caches');
     // New requirement 7 ("hotel logo fix + browser favicon"): the
     // diagnosed root cause of "the hotel logo doesn't show up" — see

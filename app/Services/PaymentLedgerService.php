@@ -69,7 +69,18 @@ class PaymentLedgerService
      */
     private const SOURCE_MODULE_DEPARTMENT_CODES = [
         'front_office' => 'FO',
-        'general_payment' => 'FO',
+        // Direct request ("the accountant recorded a payment which was an
+        // income under the bar and restaurant and it affected the
+        // expected amount of the active front desk shift... every shift
+        // is independent"): 'general_payment' (PaymentController, the
+        // general "record a payment" screen) is DELIBERATELY NOT listed
+        // here any more — it used to default to 'FO' unconditionally,
+        // which silently swept an unattributed payment recorded by
+        // ANYONE (most importantly the accountant, who has no
+        // department/shift of their own at all) into whichever Front
+        // Desk shift happened to be open. See resolveDepartmentId()'s own
+        // handling of this sourceModule for the corrected, recorder-aware
+        // logic.
         'reservation_deposit' => 'FO',
         // Correction round (audited defect #8): a deposit refund is still
         // Front Office cash movement (the same department that took the
@@ -77,6 +88,17 @@ class PaymentLedgerService
         // way — see ReservationService::disposeDeposit().
         'reservation_deposit_refund' => 'FO',
         'facility_access' => 'FO',
+        // Event Reservation feature: an event deposit is Front Office cash
+        // movement exactly like a room-reservation deposit is ("mirroring
+        // how room reservations already handle deposits and approval") —
+        // always attributed to FO and shift-gated the same way, regardless
+        // of who actually records it. Deliberately a plain map entry here
+        // rather than routed through the 'general_payment' recorder-aware
+        // branch above: unlike the generic "record a payment" screen, this
+        // sourceModule is only ever posted by EventReservationService::
+        // recordDeposit() itself, so there is no accountant-vs-front-desk
+        // ambiguity to resolve — it is always genuinely an FO transaction.
+        'event_deposit' => 'FO',
     ];
 
     /**
@@ -166,7 +188,7 @@ class PaymentLedgerService
         }
 
         $departmentWasExplicit = $departmentId !== null;
-        $resolvedDepartmentId = $this->resolveDepartmentId($sourceModule, $departmentId);
+        $resolvedDepartmentId = $this->resolveDepartmentId($sourceModule, $departmentId, $recordedBy);
 
         // Only gate a department that was AUTO-derived from a guest-facing
         // sourceModule — never one an Expense/CashDisbursement/Payroll
@@ -330,10 +352,36 @@ class PaymentLedgerService
             ]);
     }
 
-    private function resolveDepartmentId(string $sourceModule, ?int $explicit): ?int
+    private function resolveDepartmentId(string $sourceModule, ?int $explicit, ?User $recordedBy = null): ?int
     {
         if ($explicit !== null) {
             return $explicit;
+        }
+
+        // Direct request ("every shift is independent to user and the
+        // accountant has no shift, only the bar, restaurant, front
+        // desk"): the general "record a payment" screen is used both by
+        // front-desk staff (a walk-in visitor's rent — genuinely real
+        // cash sitting in the front desk's own shift) and by the
+        // accountant reconciling another outlet's handed-over takings (no
+        // department/shift of their own — see
+        // ShiftGateService::GATED_DEPARTMENT_CODES). The correct
+        // unattributed default is therefore the RECORDING user's own
+        // department — never a blanket department regardless of who
+        // recorded it — and only when that department is one of the five
+        // that actually carry a shift at all; anyone else (Accountant/
+        // Finance, Management, HR, ...) leaving this unattributed
+        // correctly resolves to no department/shift (the payment is still
+        // recorded, with its income_source and optional handed_over_by
+        // note for traceability — it simply never inflates any single
+        // outlet's cash reconciliation unless that outlet is explicitly
+        // chosen from the "sales handed over by" dropdown).
+        if ($sourceModule === 'general_payment') {
+            $recorderDepartment = $recordedBy?->department;
+
+            return ($recorderDepartment && in_array($recorderDepartment->code, ShiftGateService::GATED_DEPARTMENT_CODES, true))
+                ? $recorderDepartment->id
+                : null;
         }
 
         $code = self::SOURCE_MODULE_DEPARTMENT_CODES[$sourceModule] ?? null;

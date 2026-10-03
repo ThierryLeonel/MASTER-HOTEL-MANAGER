@@ -88,6 +88,15 @@
             </form>
         </div>
 
+        <div class="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm space-y-3">
+            <div class="font-medium text-sm">2e. Set up the starter event spaces list</div>
+            <p class="text-xs text-slate-600">Runs just the event-spaces seeder — Main Hall, Mini Hall, Pool / Outdoor Area, Conference Hall. Always safe to click any number of times: if a space with that name already exists it's left completely untouched, so this only ever fills in whichever starter venue is still missing, and never overwrites a space an admin has since renamed, edited, or deactivated. Use this if the Event Spaces list is empty.</p>
+            <form method="POST" action="{{ route('deploy-helper.seed-event-spaces') }}" class="space-y-2">
+                <input type="hidden" name="token" value="{{ $token }}">
+                <button class="rounded bg-blue-700 px-3 py-1.5 text-sm text-white hover:bg-blue-600">Set up event spaces</button>
+            </form>
+        </div>
+
         <div class="rounded-lg bg-white p-4 shadow-sm space-y-3">
             <div class="font-medium text-sm">3. Clear cached config/routes/views</div>
             <p class="text-xs text-slate-500">Runs <code>config:clear</code>, <code>cache:clear</code>, <code>route:clear</code>, <code>view:clear</code> — useful if a previous deploy left a stale cache. Never destructive to your data.</p>

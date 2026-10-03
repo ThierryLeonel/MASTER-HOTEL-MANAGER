@@ -20,6 +20,8 @@ use App\Http\Controllers\Finance\ShiftController;
 use App\Http\Controllers\Finance\TransactionController;
 use App\Http\Controllers\FrontOffice\CompanyController;
 use App\Http\Controllers\FrontOffice\DiscountApprovalController;
+use App\Http\Controllers\FrontOffice\EventReservationController;
+use App\Http\Controllers\FrontOffice\EventSpaceController;
 use App\Http\Controllers\FrontOffice\FacilityAccessController;
 use App\Http\Controllers\FrontOffice\FacilityController;
 use App\Http\Controllers\FrontOffice\CheckInController;
@@ -222,6 +224,34 @@ Route::middleware('auth')->group(function () {
         Route::get('/', [DiscountApprovalController::class, 'index'])->name('index');
         Route::post('/{discountApproval}/approve', [DiscountApprovalController::class, 'approve'])->name('approve');
         Route::post('/{discountApproval}/reject', [DiscountApprovalController::class, 'reject'])->name('reject');
+    });
+
+    // Event Reservations (direct request: "WE ALSO NEED RESERVATION FOR
+    // EVENT: WHAT KIND OF EVENT, WHICH SPACES DO THEY WANT TO RESERVE,
+    // ROOM, WHICH ROOMS (SELECT), MAIN HALL, MINI HALL FOR EXAMPLE, POOL
+    // OR THE WHOLE OUTER ENVIROMENT (SPACE) ETC") — mirrors the
+    // reservations.* route shape above. 'manage-event-spaces' (narrower,
+    // admin-tier) configures the bookable venue list; 'manage-event-
+    // reservations' (broader, front-line) is everyday booking/cancelling;
+    // 'approve-event-reservation' is the manager-tier approve/reject step,
+    // split out the same way approve-reservation is above.
+    Route::middleware('permission:manage-event-spaces')->prefix('event-spaces')->name('event-spaces.')->group(function () {
+        Route::get('/', [EventSpaceController::class, 'index'])->name('index');
+        Route::post('/', [EventSpaceController::class, 'store'])->name('store');
+        Route::put('/{eventSpace}', [EventSpaceController::class, 'update'])->name('update');
+        Route::delete('/{eventSpace}', [EventSpaceController::class, 'destroy'])->name('destroy');
+    });
+    Route::middleware('permission:manage-event-reservations')->prefix('event-reservations')->name('event-reservations.')->group(function () {
+        Route::get('/', [EventReservationController::class, 'index'])->name('index');
+        Route::get('/create', [EventReservationController::class, 'create'])->name('create');
+        Route::post('/', [EventReservationController::class, 'store'])->name('store');
+        Route::get('/{eventReservation}', [EventReservationController::class, 'show'])->name('show');
+        Route::post('/{eventReservation}/cancel', [EventReservationController::class, 'cancel'])->name('cancel');
+        Route::post('/{eventReservation}/deposit', [EventReservationController::class, 'recordDeposit'])->name('deposit');
+    });
+    Route::middleware('permission:approve-event-reservation')->prefix('event-reservations')->name('event-reservations.')->group(function () {
+        Route::post('/{eventReservation}/approve', [EventReservationController::class, 'approve'])->name('approve');
+        Route::post('/{eventReservation}/reject', [EventReservationController::class, 'reject'])->name('reject');
     });
 
     // Check-in / Stays / Folio / Checkout

@@ -162,6 +162,13 @@
                 @can('manage-reservations')
                     <a href="{{ route('reservations.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('reservations.*') ? 'is-selected' : '' }}">Reservations</a>
                 @endcan
+                {{-- Event Reservations feature: "WE ALSO NEED RESERVATION FOR EVENT..." --}}
+                @can('manage-event-reservations')
+                    <a href="{{ route('event-reservations.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('event-reservations.*') ? 'is-selected' : '' }}">Event Reservations</a>
+                @endcan
+                @can('manage-event-spaces')
+                    <a href="{{ route('event-spaces.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('event-spaces.*') ? 'is-selected' : '' }}">Event Spaces</a>
+                @endcan
                 {{-- Feature 6: discount requests addressed to me personally. --}}
                 @can('approve-discount')
                     <a href="{{ route('discount-approvals.index') }}" class="nav-link block rounded px-3 py-2 hover:bg-slate-800 {{ request()->routeIs('discount-approvals.*') ? 'is-selected' : '' }}">Discount Approvals</a>

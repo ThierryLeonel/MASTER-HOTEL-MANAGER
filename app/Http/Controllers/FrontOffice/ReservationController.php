@@ -52,7 +52,18 @@ class ReservationController extends Controller
             $prefillGuest = Guest::find($prefillGuestId);
         }
 
-        return view('front-office.reservations.create', compact('categories', 'prefillGuest'));
+        // Direct request ("WE ARE STILL NOT ABLE TO CHOSE IF IT IS A
+        // MULTIPLE ROOM RESERVATION OR SINGLE ROOM"), scoped via
+        // AskUserQuestion to "One page with a toggle": both this route and
+        // createMulti() below now render the SAME merged view — see its
+        // own docblock. $defaultMode only decides which panel is shown
+        // first; old('rooms') means a multi-room submission just failed
+        // validation and bounced back here via back()->withInput(), so the
+        // multi panel (with whatever the user had already typed) is what
+        // should reappear, not the single-room one.
+        $defaultMode = old('rooms') ? 'multi' : 'single';
+
+        return view('front-office.reservations.create', compact('categories', 'prefillGuest', 'defaultMode'));
     }
 
     public function store(Request $request)
@@ -90,7 +101,12 @@ class ReservationController extends Controller
             $prefillGuest = Guest::find($prefillGuestId);
         }
 
-        return view('front-office.reservations.create-multi', compact('categories', 'prefillGuest'));
+        // Same merged view as create() above — this route now only exists
+        // so old links/bookmarks to "Book Multiple Rooms" keep working,
+        // defaulting straight to the multi-room panel.
+        $defaultMode = 'multi';
+
+        return view('front-office.reservations.create', compact('categories', 'prefillGuest', 'defaultMode'));
     }
 
     public function storeMulti(Request $request)

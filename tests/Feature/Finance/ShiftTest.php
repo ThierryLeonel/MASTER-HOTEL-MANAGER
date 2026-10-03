@@ -270,4 +270,95 @@ class ShiftTest extends TestCase
             $this->actingAs($user)->get(route('finance.shifts.index'))->assertOk();
         }
     }
+
+    /**
+     * Direct request (verbatim): "THE ACCOUNTANT RECORDED A PAYMENT WHICH
+     * WAS AN INCOME UNDER THE BAR AND RESTAURANT AND IT AFFECTED THE
+     * EXPECTED AMMOUNT OF THE ACTIVE FRONT DESK SHIFT WHICH IS NOT
+     * SUPPOSE TO BE SO EVERY SHIFT IS INDPENDENT TO USER AND THE
+     * ACCOUNTANT HAS NO SHIFT ONLY THE BAR, RESTAURANT, FRONT DESK."
+     *
+     * Root cause (found by reading PaymentLedgerService::
+     * resolveDepartmentId() in full): the general "record a payment"
+     * screen's `source_module` ('general_payment') used to map to a
+     * hardcoded 'FO' default whenever no department was explicitly
+     * chosen — regardless of who actually recorded the payment. An
+     * accountant typing "Bar Sales" into the free-text/managed Income
+     * source dropdown (a label only, never tied to department
+     * attribution) but leaving the separate "sales handed over by"
+     * department dropdown on its default "None" therefore had their
+     * payment silently stamped with Front Office's department id and,
+     * from there, whichever Front Office shift happened to be open at
+     * that moment — exactly this bug.
+     *
+     * Fixed in resolveDepartmentId(): an unattributed 'general_payment'
+     * now defaults to the RECORDING user's own department (if any, and
+     * only if that department actually carries a shift at all) rather
+     * than a blanket Front Office default. The accountant has no
+     * department carrying a shift, so their unattributed payment now
+     * correctly resolves to no department and no shift — proven here
+     * directly against a real open Front Desk shift's expected-cash
+     * figure, which must not move by even one franc.
+     */
+    public function test_an_accountants_unattributed_general_payment_never_affects_the_open_front_desk_shift(): void
+    {
+        $fo = Department::where('code', 'FO')->first();
+        $fin = Department::where('code', 'FIN')->first();
+        $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
+        $accountant = $this->userWithRole('accountant', ['department_id' => $fin->id]);
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0])->assertRedirect();
+        $shift = Shift::firstOrFail();
+
+        // The accountant records a cash handover they themselves intend
+        // as Bar/Restaurant income — via the "Income source" label only,
+        // exactly the confusable path the bug report describes — and
+        // deliberately does NOT select anything in the separate
+        // department dropdown.
+        $this->actingAs($accountant)->post(route('payments.store'), [
+            'amount' => 40000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Bar and restaurant takings handed over',
+            'income_source' => 'BAR AND RESTAURANT',
+        ])->assertRedirect();
+
+        $payment = \App\Models\Payment::firstOrFail();
+        $this->assertNull($payment->department_id, 'An unattributed payment recorded by someone outside the gated departments must not be auto-attributed to any department.');
+        $this->assertNull($payment->shift_id, 'It must not be stamped onto any shift either.');
+
+        // The Front Desk shift's expected cash is completely unaffected —
+        // still exactly its opening balance, not inflated by the
+        // accountant's 40,000 XAF.
+        $expected = app(\App\Services\Finance\ShiftService::class)->expectedCashFor($shift->fresh());
+        $this->assertSame(0.0, $expected, 'The open Front Desk shift must be completely untouched by a payment that was never its own.');
+    }
+
+    /**
+     * The flip side of the fix: a genuine Front Desk payment (front desk
+     * staff recording a walk-in visitor's rent through the same general
+     * screen, with nothing explicitly chosen) must still land on their
+     * own open shift exactly as it always has — this is not a case where
+     * nothing gets attributed any more.
+     */
+    public function test_a_front_desk_staff_members_unattributed_general_payment_still_lands_on_their_own_shift(): void
+    {
+        $fo = Department::where('code', 'FO')->first();
+        $frontDesk = $this->userWithRole('front_desk', ['department_id' => $fo->id]);
+
+        $this->actingAs($frontDesk)->post(route('finance.shifts.store'), ['opening_cash' => 0])->assertRedirect();
+        $shift = Shift::firstOrFail();
+
+        $this->actingAs($frontDesk)->post(route('payments.store'), [
+            'amount' => 15000,
+            'financial_account_id' => $this->financialAccount('CASH')->id,
+            'notes' => 'Visitor rent payment',
+        ])->assertRedirect();
+
+        $payment = \App\Models\Payment::firstOrFail();
+        $this->assertSame($fo->id, $payment->department_id);
+        $this->assertSame($shift->id, $payment->shift_id);
+
+        $expected = app(\App\Services\Finance\ShiftService::class)->expectedCashFor($shift->fresh());
+        $this->assertSame(15000.0, $expected);
+    }
 }

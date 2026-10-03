@@ -37,6 +37,16 @@ class RolesAndPermissionsSeeder extends Seeder
         'manage-users', 'manage-settings', 'view-audit-log', 'manage-departments',
         // Front Office
         'manage-guests', 'manage-reservations', 'approve-reservation',
+        // Event Reservations (direct request: "WE ALSO NEED RESERVATION
+        // FOR EVENT..."): 'manage-event-spaces' is the narrower, admin-tier
+        // permission for configuring WHICH venues exist (Main Hall, Mini
+        // Hall, Pool, Conference Hall, etc. — an admin-editable list, not a
+        // fixed one); 'manage-event-reservations' is the everyday
+        // front-line booking/cancelling of an event against those venues
+        // and/or specific rooms; 'approve-event-reservation' is the
+        // manager-tier approve/reject step, split out the same way
+        // 'approve-reservation' already is above.
+        'manage-event-spaces', 'manage-event-reservations', 'approve-event-reservation',
         // 'view-rooms' (Phase 9.0) is deliberately separate from
         // 'manage-rooms': every role that needs to see the room/occupancy
         // board (to check guests in, plan housekeeping, etc.) should not
@@ -305,6 +315,11 @@ class RolesAndPermissionsSeeder extends Seeder
             'general_manager' => array_values(array_diff($all, ['manage-own-shift', 'manage-system-data', 'edit-room-details', 'delete-users', 'void-transactions', 'delete-income-sources'])),
             'duty_manager' => [
                 'approve-reservation', 'manage-reservations', 'manage-guests',
+                // Event Reservations: Duty Manager gets all three —
+                // configuring the venue list, everyday booking, AND
+                // approval — the same full-stack access it already holds
+                // for ordinary room reservations above.
+                'manage-event-spaces', 'manage-event-reservations', 'approve-event-reservation',
                 'view-rooms', 'manage-rooms', 'update-room-status', 'checkin-guest', 'checkout-guest',
                 'post-folio-charge', 'post-folio-payment', 'void-folio-transaction', 'record-payment',
                 'manage-housekeeping', 'report-maintenance', 'approve-maintenance', 'resolve-maintenance',
@@ -456,6 +471,12 @@ class RolesAndPermissionsSeeder extends Seeder
                 // guard (no such guard exists for reservations anywhere in
                 // this system today, unlike expenses/refunds/leave).
                 'approve-reservation',
+                // Event Reservations: Front Desk books and approves events
+                // the same way it already books and approves ordinary room
+                // reservations above, but does NOT get 'manage-event-spaces'
+                // — deciding which venues exist is an admin-tier decision
+                // (Duty Manager and up), not a front-line one.
+                'manage-event-reservations', 'approve-event-reservation',
                 'view-rooms', 'update-room-status', 'checkin-guest', 'checkout-guest',
                 'post-folio-charge', 'post-folio-payment', 'record-payment', 'manage-housekeeping', 'report-maintenance', 'request-refund',
                 // Petty sales (juice, water, snacks, biscuits, etc.) at the
@@ -504,6 +525,13 @@ class RolesAndPermissionsSeeder extends Seeder
             // tested explicitly — see MarketingManagerTest).
             'marketing_manager' => [
                 'manage-reservations', 'approve-reservation',
+                // Event Reservations: mirrors the reservations grant
+                // directly above — Marketing Manager already books/approves
+                // room reservations and takes deposits, and events (weddings,
+                // conferences, etc.) are squarely within that same
+                // guest-facing/sales remit. No 'manage-event-spaces' here
+                // either, for the same admin-tier reason noted on Front Desk.
+                'manage-event-reservations', 'approve-event-reservation',
                 'view-rooms', 'update-room-status',
                 'report-maintenance', 'approve-maintenance',
                 'manage-housekeeping', 'approve-housekeeping',

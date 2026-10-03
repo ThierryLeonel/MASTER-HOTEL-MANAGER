@@ -60,6 +60,21 @@
                     </select>
                     <p class="mt-1 text-xs text-slate-500">Choose this when the amount is a department's total takings handed over because it has no payment device of its own — it will then show up as that department's real revenue in the reports, not as generic income.</p>
                     {{--
+                        Direct request ("the accountant recorded a payment
+                        which was an income under the bar and restaurant
+                        and it affected the expected amount of the active
+                        front desk shift which is not suppose to be so"):
+                        picking "Bar Sales"/"Restaurant Sales" etc. below,
+                        under Income source, is ONLY a report label — it
+                        does NOT attribute this money to that department's
+                        shift by itself. This dropdown right here is the
+                        ONLY field that does that. Spelled out explicitly
+                        because this exact confusion is what caused a
+                        Bar/Restaurant handover to wrongly count toward the
+                        Front Desk's shift.
+                    --}}
+                    <p class="mt-1 text-xs font-medium text-amber-700">If you're recording Bar or Restaurant's handed-over sales, select the matching department above — picking "Bar Sales" etc. under Income source below is not enough on its own, and leaving this on "None" means the money won't count toward any shift's reconciliation.</p>
+                    {{--
                         Direct request ("the place in the payment form
                         that request on who handed the sales should
                         either be the department or a textbox that

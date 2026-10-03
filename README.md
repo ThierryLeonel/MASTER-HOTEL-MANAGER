@@ -578,6 +578,32 @@ Two hard constraints on free-tier InfinityFree, confirmed via their own document
 
 ## 13. Changelog
 
+**Shift cross-department leak fixed; reservations get a single/multi-room toggle; a new Event Reservations feature (`CORRECTION_ROUND_34_DELIVERY.md` §28)**
+- **Fixed a real money-attribution bug**: the accountant recording a Bar/Restaurant income payment (via the
+  general "record a payment" screen, with no department chosen) was silently inflating whichever Front Desk
+  shift happened to be open — "every shift is independent to user and the accountant has no shift." Every
+  shift is independent now: an unattributed payment lands on the RECORDING user's own department/shift only
+  when they actually have one of the five that carry a shift (Front Office/Bar/Restaurant/Bar Outside/
+  Bucareaux); an accountant (or anyone else without one) leaving it unattributed now correctly affects no
+  shift at all, while a front-desk staff member's own unattributed payment still lands on their own shift
+  exactly as before. A plain-language warning was also added under the Payments screen's department dropdown
+  to reduce this exact confusion going forward.
+- **Reservations: single room vs. multiple rooms is now one page with a toggle** — direct request: "IN THE
+  RESERVATION WE ARE STILL NOT ABLE TO CHOSE IF IT IS A MULTIPLE ROOM RESERVATION OR SINGLE ROOM." The two
+  separate forms are now one page; switch between "Single room" and "Multiple rooms" at the top. Room
+  CATEGORY is still what's booked (the actual room is still assigned later, at approval/check-in) — picking a
+  specific room at booking time is what the new Event Reservations feature below is for instead.
+- **New: Event Reservations** — direct request: "WE ALSO NEED RESERVATION FOR EVENT: WHAT KIND OF EVENT,
+  WHICH SPACES DO THEY WANT TO RESERVE, ROOM, WHICH ROOMS (SELECT), MAIN HALL, MINI HALL FOR EXAMPLE, POOL OR
+  THE WHOLE OUTER ENVIROMENT (SPACE) ETC." A new admin-editable **Event Spaces** list (seeded with Main Hall,
+  Mini Hall, Pool / Outdoor Area, Conference Hall — add, rename, or retire any of them at any time) and a new
+  **Event Reservations** screen: book an event against any combination of those spaces and/or specific guest
+  rooms, with event type, expected guest count, a date/time range, and a deposit — approved/rejected/
+  cancelled and deposit-recorded the same way room reservations already are. No double-booking: a space or
+  room already committed to another live event, or (for a room) to a real guest stay or reservation, is
+  refused. Not yet built this round, by design: deposit refund/forfeit handling on a cancelled event (handle
+  manually via Finance > Refunds for now), and any automatic room-status change from an event booking alone.
+
 **Multi-room Walk-in Check-in, and a Deploy Helper button to catch up departments on a live database (`CORRECTION_ROUND_34_DELIVERY.md` §27)**
 - A walk-in party taking several rooms can now be checked in together in one submission — "+ Check in
   Multiple Rooms" on the Walk-in Check-in screen — the same way multi-room advance Reservations already
