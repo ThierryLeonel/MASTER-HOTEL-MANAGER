@@ -54,67 +54,89 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('event_spaces', function (Blueprint $table) {
-            $table->id();
-            $table->ulid('ulid')->nullable()->unique();
-            $table->string('name', 100)->unique();
-            $table->text('description')->nullable();
-            $table->unsignedInteger('max_capacity')->nullable();
-            $table->boolean('is_active')->default(true);
-            $table->timestamps();
-        });
+        // Correction round (deploy failure, Nov 2026): a production deploy
+        // hit "Table 'event_spaces' already exists" on this migration.
+        // MySQL cannot roll back DDL (CREATE TABLE commits immediately,
+        // unlike Postgres/SQLite), so an earlier deploy attempt that
+        // created event_spaces but then failed partway through one of the
+        // three tables below left event_spaces permanently in place while
+        // Laravel's `migrations` table never recorded this migration as
+        // applied (that row is only written after the whole method
+        // returns) — so every retry re-ran from the top and hit the same
+        // "already exists" error on the first CREATE TABLE. Guarding each
+        // one with hasTable() makes this migration safe to (re)run no
+        // matter how far a previous attempt got: anything already present
+        // is left completely untouched, anything missing is created, and
+        // the migration can finally complete and be recorded.
+        if (! Schema::hasTable('event_spaces')) {
+            Schema::create('event_spaces', function (Blueprint $table) {
+                $table->id();
+                $table->ulid('ulid')->nullable()->unique();
+                $table->string('name', 100)->unique();
+                $table->text('description')->nullable();
+                $table->unsignedInteger('max_capacity')->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
+            });
+        }
 
-        Schema::create('event_reservations', function (Blueprint $table) {
-            $table->id();
-            $table->ulid('ulid')->nullable()->unique();
-            $table->string('event_reference', 30)->unique();
-            $table->string('event_name', 150);
-            // Free text ("what kind of event") rather than another managed
-            // list — wedding/conference/birthday/etc. naming is highly
-            // variable and, unlike an event space, carries no
-            // availability/capacity rule of its own that would need a
-            // real row to attach to.
-            $table->string('event_type', 100);
-            $table->foreignId('guest_id')->nullable()->constrained('guests')->nullOnDelete()
-                ->comment('The booking contact, if an existing guest — mirrors reservations.guest_id.');
-            // Mirrors the inline-contact pattern Reservation::createFromWebsite()
-            // and CheckInController's own inline-guest-creation already use:
-            // an event organizer is very often NOT a lodging guest at all.
-            $table->string('contact_name', 150)->nullable();
-            $table->string('contact_phone', 30)->nullable();
-            $table->string('contact_email', 255)->nullable();
-            $table->unsignedInteger('expected_guests')->nullable();
-            $table->dateTime('start_at');
-            $table->dateTime('end_at');
-            $table->enum('status', ['pending', 'confirmed', 'completed', 'cancelled', 'rejected'])->default('pending')->index();
-            $table->decimal('agreed_amount', 12, 2)->nullable()->comment('Total agreed price for the event, if one was quoted up front.');
-            $table->decimal('deposit_required', 12, 2)->default(0);
-            $table->decimal('deposit_paid', 12, 2)->default(0);
-            $table->foreignId('requested_by')->constrained('users')->restrictOnDelete();
-            $table->foreignId('approved_by')->nullable()->constrained('users')->nullOnDelete();
-            $table->timestamp('approved_at')->nullable();
-            $table->text('rejection_reason')->nullable();
-            $table->text('cancellation_reason')->nullable();
-            $table->text('notes')->nullable();
-            $table->timestamps();
-            $table->index(['start_at', 'end_at']);
-        });
+        if (! Schema::hasTable('event_reservations')) {
+            Schema::create('event_reservations', function (Blueprint $table) {
+                $table->id();
+                $table->ulid('ulid')->nullable()->unique();
+                $table->string('event_reference', 30)->unique();
+                $table->string('event_name', 150);
+                // Free text ("what kind of event") rather than another managed
+                // list — wedding/conference/birthday/etc. naming is highly
+                // variable and, unlike an event space, carries no
+                // availability/capacity rule of its own that would need a
+                // real row to attach to.
+                $table->string('event_type', 100);
+                $table->foreignId('guest_id')->nullable()->constrained('guests')->nullOnDelete()
+                    ->comment('The booking contact, if an existing guest — mirrors reservations.guest_id.');
+                // Mirrors the inline-contact pattern Reservation::createFromWebsite()
+                // and CheckInController's own inline-guest-creation already use:
+                // an event organizer is very often NOT a lodging guest at all.
+                $table->string('contact_name', 150)->nullable();
+                $table->string('contact_phone', 30)->nullable();
+                $table->string('contact_email', 255)->nullable();
+                $table->unsignedInteger('expected_guests')->nullable();
+                $table->dateTime('start_at');
+                $table->dateTime('end_at');
+                $table->enum('status', ['pending', 'confirmed', 'completed', 'cancelled', 'rejected'])->default('pending')->index();
+                $table->decimal('agreed_amount', 12, 2)->nullable()->comment('Total agreed price for the event, if one was quoted up front.');
+                $table->decimal('deposit_required', 12, 2)->default(0);
+                $table->decimal('deposit_paid', 12, 2)->default(0);
+                $table->foreignId('requested_by')->constrained('users')->restrictOnDelete();
+                $table->foreignId('approved_by')->nullable()->constrained('users')->nullOnDelete();
+                $table->timestamp('approved_at')->nullable();
+                $table->text('rejection_reason')->nullable();
+                $table->text('cancellation_reason')->nullable();
+                $table->text('notes')->nullable();
+                $table->timestamps();
+                $table->index(['start_at', 'end_at']);
+            });
+        }
 
-        Schema::create('event_reservation_spaces', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('event_reservation_id')->constrained('event_reservations')->cascadeOnDelete();
-            $table->foreignId('event_space_id')->constrained('event_spaces')->restrictOnDelete();
-            $table->timestamps();
-            $table->unique(['event_reservation_id', 'event_space_id']);
-        });
+        if (! Schema::hasTable('event_reservation_spaces')) {
+            Schema::create('event_reservation_spaces', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('event_reservation_id')->constrained('event_reservations')->cascadeOnDelete();
+                $table->foreignId('event_space_id')->constrained('event_spaces')->restrictOnDelete();
+                $table->timestamps();
+                $table->unique(['event_reservation_id', 'event_space_id']);
+            });
+        }
 
-        Schema::create('event_reservation_rooms', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('event_reservation_id')->constrained('event_reservations')->cascadeOnDelete();
-            $table->foreignId('room_id')->constrained('rooms')->restrictOnDelete();
-            $table->timestamps();
-            $table->unique(['event_reservation_id', 'room_id']);
-        });
+        if (! Schema::hasTable('event_reservation_rooms')) {
+            Schema::create('event_reservation_rooms', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('event_reservation_id')->constrained('event_reservations')->cascadeOnDelete();
+                $table->foreignId('room_id')->constrained('rooms')->restrictOnDelete();
+                $table->timestamps();
+                $table->unique(['event_reservation_id', 'room_id']);
+            });
+        }
     }
 
     public function down(): void
