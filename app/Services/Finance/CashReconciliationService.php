@@ -7,7 +7,9 @@ use App\Models\CashReconciliation;
 use App\Models\Payment;
 use App\Models\User;
 use App\Services\AuditLogger;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Compares the drawer's physical cash count against what the central
@@ -54,17 +56,36 @@ class CashReconciliationService
         $expected = $this->expectedCashForToday();
         $variance = round($countedAmount - $expected, 2);
 
-        $reconciliation = CashReconciliation::create([
-            'business_date' => $today->toDateString(),
-            'expected_amount' => $expected,
-            'counted_amount' => $countedAmount,
-            'variance' => $variance,
-            'recorded_by' => $actor->id,
-            'notes' => $notes,
-        ]);
+        // Correction round (code-review pass, Nov 2026): the "already
+        // recorded" check above is an application-level guard only — two
+        // concurrent submissions could both pass it before either inserts.
+        // A unique index on business_date (see this round's migration)
+        // makes the database the real source of truth for "once per day";
+        // wrapping in a transaction and catching the resulting constraint
+        // violation turns that race, if it ever happens, into the exact
+        // same friendly error the normal path already throws above,
+        // instead of an unhandled 500.
+        try {
+            return DB::transaction(function () use ($today, $expected, $countedAmount, $variance, $actor, $notes) {
+                $reconciliation = CashReconciliation::create([
+                    'business_date' => $today->toDateString(),
+                    'expected_amount' => $expected,
+                    'counted_amount' => $countedAmount,
+                    'variance' => $variance,
+                    'recorded_by' => $actor->id,
+                    'notes' => $notes,
+                ]);
 
-        $this->audit->log('finance.cash_reconciliation_recorded', 'finance', $reconciliation, null, $reconciliation->toArray(), actor: $actor);
+                $this->audit->log('finance.cash_reconciliation_recorded', 'finance', $reconciliation, null, $reconciliation->toArray(), actor: $actor);
 
-        return $reconciliation;
+                return $reconciliation;
+            });
+        } catch (QueryException $e) {
+            if ((int) $e->getCode() === 23000) {
+                throw new HmsException("Today's cash reconciliation has already been recorded.");
+            }
+
+            throw $e;
+        }
     }
 }

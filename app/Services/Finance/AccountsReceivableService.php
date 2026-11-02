@@ -50,7 +50,14 @@ class AccountsReceivableService
                 throw new HmsException("This debt is already {$locked->status} — there's nothing left to settle.");
             }
 
-            if ($amount > (float) $locked->amount_outstanding) {
+            // Correction round (code-review pass, Nov 2026): this used a
+            // plain float ">" comparison on currency, the same pattern
+            // flagged and already fixed in RefundService — a settlement
+            // for exactly the outstanding amount could occasionally be
+            // rejected (or a slightly-over amount wrongly accepted) due to
+            // ordinary floating-point representation error. bccomp does
+            // the comparison as exact decimal strings instead.
+            if (bccomp((string) $amount, (string) $locked->amount_outstanding, 2) > 0) {
                 throw new HmsException("This payment ({$amount}) exceeds the outstanding balance ({$locked->amount_outstanding}).");
             }
 
@@ -66,7 +73,10 @@ class AccountsReceivableService
                 financialAccountId: $financialAccountId,
             );
 
-            $newOutstanding = round((float) $locked->amount_outstanding - $amount, 2);
+            // Same fix as above: exact decimal subtraction instead of a
+            // float subtraction + round(), so amount_outstanding can't
+            // drift by a fraction of a franc across repeated settlements.
+            $newOutstanding = bcsub((string) $locked->amount_outstanding, (string) $amount, 2);
 
             $locked->update([
                 'amount_outstanding' => $newOutstanding,

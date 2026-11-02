@@ -131,7 +131,14 @@ class CashDisbursementService
                     throw new HmsException("Only an approved expense can be disbursed against (current status: {$expense->status}).");
                 }
 
-                if (abs((float) $expense->amount - $amount) > 0.005) {
+                // Correction round (code-review pass, Nov 2026): this used
+                // to compare with `abs(float diff) > 0.005` — a tolerance
+                // band bolted on specifically because plain float equality
+                // on currency is unreliable. bccomp does an exact decimal
+                // comparison instead, so the tolerance hack (and the small
+                // risk of it letting a genuinely-off amount through) is no
+                // longer needed.
+                if (bccomp((string) $expense->amount, (string) $amount, 2) !== 0) {
                     throw new HmsException("This disbursement ({$amount}) does not match the expense's approved amount ({$expense->amount}) — they must be equal so the ledger and the expense agree on what was paid.");
                 }
 
@@ -146,7 +153,7 @@ class CashDisbursementService
                     throw new HmsException("This ticket is not open (current status: {$ticket->status}) — it cannot be disbursed against.");
                 }
 
-                if ($amount > (float) $ticket->amount) {
+                if (bccomp((string) $amount, (string) $ticket->amount, 2) > 0) {
                     throw new HmsException("This disbursement ({$amount}) exceeds the ticket's authorized amount ({$ticket->amount}).");
                 }
 
